@@ -2,15 +2,17 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import JSZip from 'jszip';
 
-import { 
+import {
   getTranslations,
   getOriginalTranslations,
-  getLanguages, 
-  getMyProposals, 
-  createProposal, 
+  getLanguages,
+  getMyProposals,
+  createProposal,
   deleteProposal,
   getProposalsCount,
   downloadTranslations,
+  downloadTranslationsWithStructure,
+  updateTranslation,
   getScreens
 } from '../services/api';
 
@@ -34,6 +36,7 @@ function Translations({ user }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [filesMetadata, setFilesMetadata] = useState({}); // New: Store file metadata
   const scrollPositionRef = useRef(0);
   const shouldRestoreScrollRef = useRef(false);
   const searchRef = useRef(null);
@@ -63,6 +66,247 @@ function Translations({ user }) {
   useEffect(() => {
     calculateUnassignedKeys();
   }, [translations, screensMap]);
+
+  // Auto-resize all textareas when content changes
+  useEffect(() => {
+    const textareas = document.querySelectorAll('textarea');
+    textareas.forEach(textarea => {
+      autoResizeTextarea(textarea);
+    });
+  }, [editedValues]);
+
+  // Helper function to flatten nested object into dot-notation keys
+  const flattenObject = (obj, prefix = '') => {
+    const flattened = {};
+
+    if (!obj || typeof obj !== 'object') {
+      console.log('flattenObject: invalid input', { obj, type: typeof obj });
+      return flattened;
+    }
+
+    Object.keys(obj).forEach(key => {
+      const newKey = prefix ? `${prefix}.${key}` : key;
+
+      if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+        Object.assign(flattened, flattenObject(obj[key], newKey));
+      } else {
+        // Convert to string to avoid React rendering issues
+        flattened[newKey] = String(obj[key] || '');
+      }
+    });
+
+    return flattened;
+  };
+
+  // Helper function to find which file contains a specific key
+  const findFileForKey = (files, key) => {
+    if (!files || !key) return null;
+
+    // Try to match the key to a file based on the first part of the key
+    const keyParts = key.split('.');
+    const possibleFileName = `${keyParts[0]}.json`;
+
+    // Look for the file in metadata
+    const fileInfo = files[possibleFileName];
+    if (fileInfo) {
+      return {
+        fileName: possibleFileName,
+        ...fileInfo
+      };
+    }
+
+    // If not found by name, could implement more sophisticated matching
+    return null;
+  };
+
+  // Helper function for safe translation access
+  const getTranslationByPath = (translations, path, fallback = '') => {
+    if (!path) return fallback;
+    return path.split('.').reduce((obj, key) => obj?.[key], translations) || fallback;
+  };
+
+
+  // Helper function to get nested value using dot notation
+  const getNestedValue = (obj, keyPath) => {
+    return keyPath.split('.').reduce((current, part) => current?.[part], obj);
+  };
+
+  // Helper function to set nested value using dot notation
+  const setNestedValue = (obj, keyPath, value) => {
+    const keys = keyPath.split('.');
+    const lastKey = keys.pop();
+    const target = keys.reduce((current, key) => {
+      if (!current[key] || typeof current[key] !== 'object') {
+        current[key] = {};
+      }
+      return current[key];
+    }, obj);
+    target[lastKey] = value;
+  };
+
+  // Helper function to auto-resize textarea with perfect sizing
+  const autoResizeTextarea = (element) => {
+    if (element) {
+      // Reset height to auto to get accurate scrollHeight
+      element.style.height = 'auto';
+      // Set height to scrollHeight but ensure minimum height of 60px
+      const newHeight = Math.max(element.scrollHeight, 60);
+      element.style.height = newHeight + 'px';
+      // Ensure no scroll bars
+      element.style.overflow = 'hidden';
+    }
+  };
+
+  // Helper function to insert text at cursor position in textarea
+  const insertTextAtCursor = (textarea, text) => {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const value = textarea.value;
+    const newValue = value.substring(0, start) + text + value.substring(end);
+
+    // Update the value
+    const originalScreen = htmlEditingKey.split('.')[0];
+    const key = htmlEditingKey.split('.').slice(1).join('.');
+    handleTranslationChange(originalScreen, key, newValue);
+
+    // Set cursor position after inserted text
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + text.length, start + text.length);
+      autoResizeTextarea(textarea);
+    }, 0);
+  };
+
+  // Save current translation
+  const saveCurrentTranslation = async (originalScreen, key) => {
+    console.log('🚀 saveCurrentTranslation called with:', { originalScreen, key });
+    const translationKey = `${originalScreen}.${key}`;
+    setSavingKeys(prev => new Set([...prev, translationKey]));
+
+    try {
+      // Get the current edited value, not the original translation
+      const currentValue = editedValues[originalScreen]?.[key] || '';
+
+      if (!currentValue) {
+        alert('No changes to save');
+        return;
+      }
+
+      // Get the original value for comparison
+      const flatOriginalTranslations = flattenObject(originalTranslations);
+      const originalValue = flatOriginalTranslations[key] || '';
+
+      // Determine if this is a real screen or unassigned
+      const isUnassignedKey = originalScreen === '__unassigned__';
+      let proposalData = {
+        language: selectedLanguage,
+        key,
+        originalValue,
+        proposedValue: currentValue
+      };
+
+      // Add screenId if this is from a real screen (not unassigned)
+      if (!isUnassignedKey) {
+        // Find the screen ID from the screensMap
+        const screen = screensMap.get(originalScreen);
+        if (screen && screen._id) {
+          proposalData.screenId = screen._id;
+        }
+      }
+
+      console.log('Creating proposal:', {
+        originalScreen,
+        key,
+        selectedLanguage,
+        currentValue,
+        originalValue,
+        isUnassignedKey,
+        screenId: proposalData.screenId,
+        proposalData
+      });
+
+      console.log('About to create proposal with data:', proposalData);
+
+      const createResponse = await createProposal(proposalData);
+
+      console.log('Proposal created successfully:', createResponse.data);
+
+      // Refresh proposals count and data
+      if (window.refreshProposalsCount) {
+        await window.refreshProposalsCount();
+      }
+
+      // Reload user proposals to see the new one
+      const proposalsRes = await getMyProposals(selectedLanguage);
+      console.log('📋 Proposals after save:', proposalsRes.data);
+      setUserProposals(proposalsRes.data);
+
+      // Clear the edited value since it's now saved as a proposal
+      setEditedValues(prev => {
+        const newValues = { ...prev };
+        if (newValues[originalScreen]) {
+          const updatedScreen = { ...newValues[originalScreen] };
+          delete updatedScreen[key];
+
+          // If screen has no more edits, remove it completely
+          if (Object.keys(updatedScreen).length === 0) {
+            delete newValues[originalScreen];
+          } else {
+            newValues[originalScreen] = updatedScreen;
+          }
+        }
+        return newValues;
+      });
+
+      // Success - proposal created (no annoying alert)
+    } catch (err) {
+      console.error('❌ Error saving translation:', err);
+      console.error('❌ Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+        config: err.config,
+        originalScreen,
+        key,
+        translationKey,
+        proposalData: {
+          language: selectedLanguage,
+          key,
+          originalValue: flattenObject(originalTranslations)[key],
+          proposedValue: editedValues[originalScreen]?.[key]
+        }
+      });
+
+      // Show user-friendly error message
+      const errorMessage = err.response?.data?.message || err.message || 'Unknown error occurred';
+      alert(`Error creando propuesta: ${errorMessage}`);
+    } finally {
+      setSavingKeys(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(translationKey);
+        return newSet;
+      });
+    }
+  };
+
+  // Helper function to render HTML safely (basic HTML only)
+  const renderSafeHTML = (html) => {
+    // Basic sanitization - only allow specific tags
+    const allowedTags = ['br', 'b', 'strong', 'ul', 'ol', 'li', 'a'];
+    const div = document.createElement('div');
+    div.innerHTML = html;
+
+    // Remove any tags not in allowed list
+    const allElements = div.querySelectorAll('*');
+    for (let element of allElements) {
+      if (!allowedTags.includes(element.tagName.toLowerCase())) {
+        element.outerHTML = element.innerHTML;
+      }
+    }
+
+    return div.innerHTML;
+  };
+
 
 
   // Restore scroll position after content loads
@@ -102,14 +346,13 @@ function Translations({ user }) {
     const results = [];
     const query = searchQuery.toLowerCase();
 
-    // Helper function to get translation value
-    const getTranslationValue = (obj, keyPath) => {
-      return keyPath.split('.').reduce((current, part) => current?.[part], obj);
-    };
+    // Flatten both translations objects for searching
+    const flatTranslations = flattenObject(translations);
+    const flatEnglishTranslations = flattenObject(englishTranslations);
 
-    // Search through translations (flat structure)
-    Object.entries(translations).forEach(([key, value]) => {
-      const englishValue = String(getTranslationValue(englishTranslations, key) || '');
+    // Search through flattened translations
+    Object.entries(flatTranslations).forEach(([key, value]) => {
+      const englishValue = String(flatEnglishTranslations[key] || '');
       const currentValue = String(value || '');
 
       // Check if query matches key, English translation, or current language translation
@@ -119,18 +362,22 @@ function Translations({ user }) {
         currentValue.toLowerCase().includes(query)
       ) {
         // Find which screen this key belongs to
-        let screenName = '__unassigned__';
+        let screenName = key.split('.')[0]; // First part is the screen/section
+
+        // Check if it's in custom screens or unassigned
         if (Object.keys(customScreens).length > 0) {
+          let found = false;
           Object.entries(customScreens).forEach(([customScreenName, keySet]) => {
             if (keySet.has && keySet.has(key)) {
               screenName = customScreenName;
+              found = true;
             }
           });
-          if (unassignedKeys.includes(key)) {
+          if (!found && unassignedKeys.includes(key)) {
             screenName = '__unassigned__';
           }
         }
-        
+
         results.push({
           fullKey: key,
           englishValue,
@@ -143,7 +390,7 @@ function Translations({ user }) {
 
     setSearchResults(results.slice(0, 10)); // Limit to 10 results
     setShowSearchResults(true);
-  }, [searchQuery, translations, englishTranslations, selectedLanguage]);
+  }, [searchQuery, translations, englishTranslations, selectedLanguage, customScreens, unassignedKeys]);
 
   const loadProposalsCount = async () => {
     try {
@@ -182,21 +429,40 @@ function Translations({ user }) {
 
   const calculateUnassignedKeys = () => {
     if (Object.keys(translations).length > 0) {
+      // Flatten the nested translations to get all dot-notation keys
+      const flatTranslations = flattenObject(translations);
+
       if (screensMap.size > 0) {
         // If we have screens, calculate which keys are not assigned
         const assignedKeys = new Set();
         screensMap.forEach(screen => {
           screen.keys?.forEach(key => assignedKeys.add(key));
         });
-        
-        const allKeys = Object.keys(translations);
+
+        const allKeys = Object.keys(flatTranslations);
         const unassigned = allKeys.filter(key => !assignedKeys.has(key));
+
+        console.log('calculateUnassignedKeys - with screens:', {
+          allKeysCount: allKeys.length,
+          assignedKeysCount: assignedKeys.size,
+          unassignedCount: unassigned.length,
+          screensMapSize: screensMap.size
+        });
+
         setUnassignedKeys(unassigned);
       } else {
         // Fallback: if no screens configured, all keys are unassigned
-        setUnassignedKeys(Object.keys(translations));
+        const allKeys = Object.keys(flatTranslations);
+
+        console.log('calculateUnassignedKeys - fallback:', {
+          allKeysCount: allKeys.length,
+          translationsKeys: Object.keys(translations)
+        });
+
+        setUnassignedKeys(allKeys);
       }
     } else {
+      console.log('calculateUnassignedKeys - no translations');
       setUnassignedKeys([]);
     }
   };
@@ -205,8 +471,19 @@ function Translations({ user }) {
     try {
       const res = await getLanguages();
       setLanguages(res.data.languages);
-      if (res.data.languages.length > 0 && !selectedLanguage) {
-        setSelectedLanguage(res.data.languages[0]);
+      // Only set language if not already set, prioritize 'de' if available
+      if (res.data.languages.length > 0 && selectedLanguage === 'de') {
+        // Keep 'de' if it exists in the available languages, otherwise use first
+        if (!res.data.languages.includes('de')) {
+          setSelectedLanguage(res.data.languages[0]);
+        }
+      } else if (res.data.languages.length > 0 && !selectedLanguage) {
+        // If no language selected, prefer 'de' if available
+        if (res.data.languages.includes('de')) {
+          setSelectedLanguage('de');
+        } else {
+          setSelectedLanguage(res.data.languages[0]);
+        }
       }
     } catch (err) {
       console.error('Error loading languages');
@@ -228,23 +505,37 @@ function Translations({ user }) {
       const res = await getTranslations(lang);
       const originalRes = await getOriginalTranslations(lang);
       const proposalsRes = await getMyProposals(lang);
-      
+
+      console.log('loadTranslations for', lang, ':', {
+        translationsKeys: Object.keys(res.data.content),
+        flattenedCount: Object.keys(flattenObject(res.data.content)).length,
+        fullResponse: res.data,
+        contentSample: Object.keys(res.data.content).slice(0, 3).map(key => ({
+          key,
+          type: typeof res.data.content[key],
+          keys: typeof res.data.content[key] === 'object' ? Object.keys(res.data.content[key]).slice(0, 3) : null
+        })),
+        filesMetadata: res.data.files // Log the new metadata
+      });
+
       setOriginalTranslations(res.data.content);
       setOriginalGithubTranslations(originalRes.data.content);
       setTranslations(res.data.content);
+      setFilesMetadata(res.data.files || {}); // Store file metadata
       setUserProposals(proposalsRes.data);
       
-      // Initialize edited values with proposals or originals (flat structure)
+      // Initialize edited values with proposals or originals (nested structure)
       const initialEditedValues = {};
-      Object.entries(res.data.content).forEach(([key, value]) => {
-        // For flat structure, we need to extract screen from the key or use a default
-        const screenMatch = key.match(/^\[([^\]]+)\]/);
-        const screen = screenMatch ? screenMatch[1] : 'common';
-        
+      const flatTranslations = flattenObject(res.data.content);
+
+      Object.entries(flatTranslations).forEach(([key, value]) => {
+        // Extract screen from the key (first part before dot)
+        const screen = key.split('.')[0];
+
         if (!initialEditedValues[screen]) {
           initialEditedValues[screen] = {};
         }
-        
+
         const proposalKey = `${lang}.${screen}.${key}`;
         const proposal = proposalsRes.data[proposalKey];
         // Only show pending proposals, not approved/rejected ones
@@ -264,54 +555,54 @@ function Translations({ user }) {
   };
 
   const handleDownloadAll = async () => {
-  try {
-    setDownloading(true);
-    
-    // Create a new ZIP file
-    const zip = new JSZip();
-    
-    // Download each language and add to ZIP
-    for (const lang of languages) {
-      try {
-        // Get the translations with approved proposals merged
-        const response = await downloadTranslations(lang);
-        
-        // response.data now contains the JSON object directly
-        // Add file to ZIP with proper formatting
-        zip.file(`${lang}.json`, JSON.stringify(response.data, null, 2));
-        
-      } catch (err) {
-        console.error(`Error downloading ${lang} translations:`, err);
-        alert(`Error downloading ${lang} translations`);
-      }
+    try {
+      setDownloading(true);
+
+      // Use the new structure endpoint
+      const response = await downloadTranslationsWithStructure();
+      const structureData = response.data;
+
+      console.log('Downloaded structure data:', structureData);
+
+      // Create a new ZIP file
+      const zip = new JSZip();
+
+      // Process the new structure: repo -> language -> files
+      Object.entries(structureData).forEach(([repoName, repoData]) => {
+        Object.entries(repoData).forEach(([language, langData]) => {
+          Object.entries(langData).forEach(([fileName, fileContent]) => {
+            const filePath = `${repoName}/${language}/${fileName}`;
+            zip.file(filePath, JSON.stringify(fileContent, null, 2));
+          });
+        });
+      });
+
+      // Generate the ZIP file
+      const zipBlob = await zip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: {
+          level: 9
+        }
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `translations-structure-${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+    } catch (err) {
+      console.error('Error downloading translations structure:', err);
+      alert('Error downloading translations structure');
+    } finally {
+      setDownloading(false);
     }
-    
-    // Generate the ZIP file
-    const zipBlob = await zip.generateAsync({ 
-      type: 'blob',
-      compression: 'DEFLATE',
-      compressionOptions: {
-        level: 9
-      }
-    });
-    
-    // Create download link
-    const url = window.URL.createObjectURL(zipBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `translations-${new Date().toISOString().split('T')[0]}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-    
-  } catch (err) {
-    console.error('Error downloading translations:', err);
-    alert('Error downloading translations');
-  } finally {
-    setDownloading(false);
-  }
-};
+  };
 
 
   const handleLanguageChange = (lang) => {
@@ -333,28 +624,58 @@ function Translations({ user }) {
   };
 
   const handleTranslationChange = (screen, key, value) => {
-    setEditedValues(prev => ({
-      ...prev,
-      [screen]: {
-        ...prev[screen],
-        [key]: value
-      }
-    }));
+    console.log('✏️ handleTranslationChange:', { screen, key, value });
+    setEditedValues(prev => {
+      const newState = {
+        ...prev,
+        [screen]: {
+          ...prev[screen],
+          [key]: value
+        }
+      };
+      console.log('📝 Updated editedValues:', newState);
+      return newState;
+    });
   };
 
   const isModified = (screen, key) => {
-    const proposalKey = `${selectedLanguage}.${screen}.${key}`;
-    const proposal = userProposals[proposalKey];
-    const originalValue = translations[key] || '';
-    const currentValue = editedValues[screen]?.[key] || originalValue;
-    
-    // If there's a pending proposal, compare against the proposal value
-    if (proposal && proposal.status === 'pending') {
-      return currentValue !== proposal.proposedValue;
+    // Use the correct proposal key based on screen type
+    let proposalKey;
+    if (screen === '__unassigned__') {
+      proposalKey = `${selectedLanguage}.unassigned.${key}`;
+    } else {
+      proposalKey = `${selectedLanguage}.${screen}.${key}`;
     }
-    
-    // If no pending proposal, compare against original translation value
-    return currentValue !== originalValue;
+    const proposal = userProposals[proposalKey];
+
+    // Get the original value from nested structure
+    const flatTranslations = flattenObject(translations);
+    const originalValue = flatTranslations[key] || '';
+    const currentValue = editedValues[screen]?.[key] || originalValue;
+
+    const result = (() => {
+      // If there's a pending proposal, compare against the proposal value
+      if (proposal && proposal.status === 'pending') {
+        return currentValue !== proposal.proposedValue;
+      }
+
+      // If no pending proposal, compare against original translation value
+      return currentValue !== originalValue;
+    })();
+
+    // Only log when there's actually a modification (and limit logging)
+    if (result && Math.random() < 0.1) { // Only log 10% of the time to reduce spam
+      console.log(`🔍 isModified(${screen}, ${key}):`, {
+        proposalKey,
+        originalValue,
+        currentValue,
+        editedValue: editedValues[screen]?.[key],
+        hasProposal: !!proposal,
+        result
+      });
+    }
+
+    return result;
   };
 
   const handleSaveTranslation = async (customScreen, key) => {
@@ -378,11 +699,14 @@ function Translations({ user }) {
         throw new Error(`Screen "${customScreen}" not found`);
       }
       
+      // Get original value from nested structure
+      const flatOriginalTranslations = flattenObject(originalTranslations);
+
       await createProposal({
         language: selectedLanguage,
         screenId: screen._id,
         key,
-        originalValue: originalTranslations[key],
+        originalValue: flatOriginalTranslations[key],
         proposedValue: proposedValue
       });
 
@@ -400,9 +724,9 @@ function Translations({ user }) {
         }
       }));
       
-      // Reload proposals count if admin
-      if (isAdmin) {
-        loadProposalsCount();
+      // Reload proposals count for all users (to update sidebar)
+      if (window.refreshProposalsCount) {
+        window.refreshProposalsCount();
       }
 
     } catch (err) {
@@ -428,17 +752,18 @@ function Translations({ user }) {
       setUserProposals(proposalsRes.data);
       
       // Reset edited value to current translation (which includes approved)
+      const flatTranslations = flattenObject(translations);
       setEditedValues(prev => ({
         ...prev,
         [screen]: {
           ...prev[screen],
-          [key]: translations[key]
+          [key]: flatTranslations[key]
         }
       }));
       
-      // Reload proposals count if admin
-      if (isAdmin) {
-        loadProposalsCount();
+      // Reload proposals count for all users (to update sidebar)
+      if (window.refreshProposalsCount) {
+        window.refreshProposalsCount();
       }
     } catch (err) {
       console.error('Error deleting proposal:', err);
@@ -539,28 +864,36 @@ function Translations({ user }) {
 
   const getScreensByCategory = () => {
     const categories = {};
-    
+
     // Add custom screens if any exist
     if (Object.keys(customScreens).length > 0) {
       categories['Screens'] = Object.keys(customScreens);
     }
-    
+
     // Always add unassigned section if there are unassigned keys
-    // This includes the fallback case where no screens are configured
     if (unassignedKeys && unassignedKeys.length > 0) {
       categories['Unassigned Keys'] = ['__unassigned__'];
     }
-    
+
+    // Debug logging
+
     return categories;
   };
 
   const getLanguageFlag = (lang) => {
     const flags = {
       'en': '🇬🇧',
+      'EN': '🇬🇧',
       'es': '🇪🇸',
+      'ES': '🇪🇸',
       'de': '🇩🇪',
+      'DE': '🇩🇪',
       'fr': '🇫🇷',
-      'it': '🇮🇹'
+      'FR': '🇫🇷',
+      'it': '🇮🇹',
+      'IT': '🇮🇹',
+      'pt': '🇵🇹',
+      'PT': '🇵🇹'
     };
     return flags[lang] || '🌐';
   };
@@ -738,7 +1071,9 @@ function Translations({ user }) {
       {/* Translations content */}
       <div className="p-6">
         <div className="space-y-6">
-          {Object.entries(getScreensByCategory()).map(([category, screens]) => (
+          {(() => {
+            const categories = getScreensByCategory();
+            return Object.entries(categories).map(([category, screens]) => (
             <div key={category} className="space-y-3">
               {/* Category header - only show for non-custom screens */}
               {category !== 'Screens' && category !== 'Unassigned Keys' && (
@@ -770,19 +1105,22 @@ function Translations({ user }) {
                       originalScreen: '__unassigned__',
                       fullKey: key
                     }));
-                  } else {
+                  } else if (isCustomScreen) {
                     // For custom screens, get keys from the custom configuration
-                    screenKeys = isCustomScreen 
-                      ? Array.from(customScreens[screen]).map(key => ({
-                          key: key,
-                          originalScreen: screen,
-                          fullKey: key
-                        }))
-                      : Object.keys(translations[screen] || {}).map(key => ({
-                          key,
-                          originalScreen: screen,
-                          fullKey: key
-                        }));
+                    screenKeys = Array.from(customScreens[screen]).map(key => ({
+                      key: key,
+                      originalScreen: screen,
+                      fullKey: key
+                    }));
+                  } else {
+                    // For sections from nested structure, flatten and get keys
+                    const sectionData = translations[screen] || {};
+                    const flatSection = flattenObject(sectionData, screen);
+                    screenKeys = Object.keys(flatSection).map(key => ({
+                      key,
+                      originalScreen: screen,
+                      fullKey: key
+                    }));
                   }
                       
                   return (
@@ -829,43 +1167,65 @@ function Translations({ user }) {
                         <div className="border-t border-gray-100">
                           <div className="divide-y divide-gray-50">
                             {screenKeys.map(({ key, originalScreen, fullKey }) => {
-                              // Get values for both languages
-                              const getTranslationValue = (obj, keyPath) => {
-                                return keyPath.split('.').reduce((current, part) => current?.[part], obj);
-                              };
-                              
-                              const englishValue = getTranslationValue(englishTranslations, key) || '';
-                              const currentTranslationValue = getTranslationValue(translations, key) || '';
-                              
-                              // Use the custom screen name for proposal lookup
-                              const proposalKey = `${selectedLanguage}.${originalScreen}.${key}`;
+                              // Get values for both languages using flattened objects
+                              const flatEnglishTranslations = flattenObject(englishTranslations);
+                              const flatTranslations = flattenObject(translations);
+                              const flatOriginalGithubTranslations = flattenObject(originalGithubTranslations);
+
+                              const englishValue = String(flatEnglishTranslations[key] || '');
+                              const currentTranslationValue = String(flatTranslations[key] || '');
+
+                              // Use the correct proposal key based on screen type
+                              let proposalKey;
+                              if (originalScreen === '__unassigned__') {
+                                proposalKey = `${selectedLanguage}.unassigned.${key}`;
+                              } else {
+                                proposalKey = `${selectedLanguage}.${originalScreen}.${key}`;
+                              }
+
                               const proposal = userProposals[proposalKey];
                               const hasPendingProposal = proposal && proposal.status === 'pending';
+
+                              // Debug log for testing
+                              if (key === 'email.today_training.headerTitle' || key === 'email.today_training.greeting') {
+                                console.log('🔍 Checking proposal for key:', {
+                                  originalScreen,
+                                  key,
+                                  proposalKey,
+                                  proposal,
+                                  hasPendingProposal,
+                                  allProposals: Object.keys(userProposals)
+                                });
+                              }
                               const modified = isModified(originalScreen, key);
                               const isSaving = savingKeys.has(proposalKey);
                               const currentValue = editedValues[originalScreen]?.[key] || currentTranslationValue;
-                              
+
                               // Check if current translation (with approved proposals) differs from original GitHub version
-                              const originalGithubValue = originalGithubTranslations[key] || '';
-                              const currentDisplayedValue = translations[key] || '';
+                              const originalGithubValue = String(flatOriginalGithubTranslations[key] || '');
+                              const currentDisplayedValue = String(flatTranslations[key] || '');
                               const isDifferentFromOriginal = currentDisplayedValue !== originalGithubValue;
                               
                               return (
                                 <div key={fullKey} id={`translation-${fullKey}`} className="px-6 py-4 transition-colors duration-300">
                                   <div className="mb-3">
-                                    {/* English translation with key on right */}
-                                    <div className="flex items-start justify-between gap-3 mb-2">
-                                      <div className="flex items-start gap-2 flex-1">
-                                        {isDifferentFromOriginal && (
-                                          <div className="w-2 h-2 bg-red-500 rounded-full mt-1 flex-shrink-0" title="Translation differs from original GitHub version"></div>
-                                        )}
-                                        <span className="text-sm font-bold text-gray-700 break-words">
-                                          {englishValue}
-                                        </span>
+                                    {/* English translation with responsive layout */}
+                                    <div className="mb-2">
+                                      <div className="flex items-start gap-3">
+                                        <div className="flex items-start gap-2 flex-1 min-w-0">
+                                          {isDifferentFromOriginal && (
+                                            <div className="w-2 h-2 bg-red-500 rounded-full mt-1 flex-shrink-0" title="Translation differs from original GitHub version"></div>
+                                          )}
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <span className="text-sm font-bold text-gray-700 break-words" dangerouslySetInnerHTML={{ __html: englishValue }}></span>
+                                              <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-500 flex-shrink-0 whitespace-nowrap">
+                                                {key}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        </div>
                                       </div>
-                                      <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-500 flex-shrink-0">
-                                        {key}
-                                      </span>
                                     </div>
                                     
                                     {hasPendingProposal && (
@@ -886,31 +1246,58 @@ function Translations({ user }) {
                                   </div>
                                   
                                   {/* Editable translation for selected language */}
-                                  <div className="flex items-start space-x-3">
-                                    <textarea
-                                      value={currentValue}
-                                      onChange={(e) => handleTranslationChange(originalScreen, key, e.target.value)}
-                                      className={`flex-1 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-milo-red focus:border-milo-red resize-none ${
-                                        hasPendingProposal && !modified ? 'border-yellow-400 bg-yellow-50' : 
-                                        modified ? 'border-orange-400 bg-orange-50' : 
-                                        'border-gray-300'
-                                      }`}
-                                      rows={Math.max(Math.ceil(currentValue.length / 80), 1)}
-                                      placeholder={`Enter ${selectedLanguage.toUpperCase()} translation...`}
-                                    />
-                                    {modified && (
-                                      <button
-                                        onClick={() => handleSaveTranslation(originalScreen, key)}
-                                        disabled={isSaving}
-                                        className={`px-4 py-2 text-white text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
-                                          isSaving 
-                                            ? 'bg-gray-400 cursor-not-allowed' 
-                                            : 'bg-milo-red hover:bg-milo-dark'
+                                  <div className="space-y-3">
+                                    {/* Simple HTML Editor - Always active */}
+                                    <div className="space-y-2">
+                                      <div
+                                        contentEditable
+                                        suppressContentEditableWarning={true}
+                                        ref={(el) => {
+                                          if (el && el.innerHTML !== currentValue) {
+                                            el.innerHTML = currentValue || '';
+                                          }
+                                        }}
+                                        onInput={(e) => {
+                                          const htmlContent = e.target.innerHTML;
+                                          handleTranslationChange(originalScreen, key, htmlContent);
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter' && !e.shiftKey) {
+                                            // Let the browser handle Enter normally for line breaks
+                                            // Only prevent default if we want custom behavior
+                                            return;
+                                          }
+                                        }}
+                                        className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-milo-red focus:border-milo-red min-h-[60px] ${
+                                          hasPendingProposal && !modified ? 'border-yellow-400 bg-yellow-50' :
+                                          modified ? 'border-orange-400 bg-orange-50' :
+                                          'border-gray-300'
                                         }`}
-                                      >
-                                        {isSaving ? 'Saving...' : 'Save Proposal'}
-                                      </button>
-                                    )}
+                                        style={{
+                                          minHeight: '60px',
+                                          overflow: 'auto'
+                                        }}
+                                      />
+
+                                      {/* Save Button - Only when modified */}
+                                      {modified && (
+                                        <div className="flex justify-end">
+                                          <button
+                                            onClick={() => saveCurrentTranslation(originalScreen, key)}
+                                            disabled={isSaving}
+                                            className={`px-4 py-2 text-xs font-medium rounded transition-colors ${
+                                              isSaving
+                                                ? 'bg-gray-400 text-white cursor-not-allowed'
+                                                : 'bg-milo-red text-white hover:bg-milo-dark'
+                                            }`}
+                                            title="Crear Propuesta de Traducción"
+                                          >
+                                            {isSaving ? 'Creando...' : 'Crear Propuesta'}
+                                          </button>
+                                        </div>
+                                      )}
+
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -923,7 +1310,8 @@ function Translations({ user }) {
                 })}
               </div>
             </div>
-          ))}
+          ));
+          })()}
         </div>
 
         {/* Unsaved changes indicator */}

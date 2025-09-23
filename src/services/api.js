@@ -76,6 +76,9 @@ export const addKeyToScreen = (id, key) =>
 export const removeKeyFromScreen = (id, key) =>
   api.delete(`/screens/${id}/keys/${encodeURIComponent(key)}`);
 
+export const reorderScreens = (screenOrders) =>
+  api.put('/screens/reorder', { screenOrders });
+
 export const getUnassignedKeys = () =>
   api.get('/screens/unassigned/keys');
 

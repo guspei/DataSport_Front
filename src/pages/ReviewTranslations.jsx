@@ -15,11 +15,34 @@ function ReviewTranslations() {
   const [proposals, setProposals] = useState([]);
   const [groupedProposals, setGroupedProposals] = useState({});
   const [originalTranslations, setOriginalTranslations] = useState({});
+  const [englishTranslations, setEnglishTranslations] = useState({});
   const [loading, setLoading] = useState(true);
   const [expandedScreens, setExpandedScreens] = useState(new Set());
   const [processingIds, setProcessingIds] = useState(new Set());
   const [languageCounts, setLanguageCounts] = useState({});
   const [downloading, setDownloading] = useState(false);
+
+  // Helper function to flatten nested object into dot-notation keys
+  const flattenObject = (obj, prefix = '') => {
+    const flattened = {};
+
+    if (!obj || typeof obj !== 'object') {
+      return flattened;
+    }
+
+    Object.keys(obj).forEach(key => {
+      const newKey = prefix ? `${prefix}.${key}` : key;
+
+      if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+        Object.assign(flattened, flattenObject(obj[key], newKey));
+      } else {
+        // Convert to string to avoid React rendering issues
+        flattened[newKey] = String(obj[key] || '');
+      }
+    });
+
+    return flattened;
+  };
 
   useEffect(() => {
     loadLanguages();
@@ -43,9 +66,19 @@ function ReviewTranslations() {
     try {
       const res = await getLanguages();
       setLanguages(res.data.languages);
-      // Only set default if 'de' is not available or if no language is selected
-      if (res.data.languages.length > 0 && !res.data.languages.includes('de')) {
-        setSelectedLanguage(res.data.languages[0]);
+      // Only set language if not already set, prioritize 'de' if available
+      if (res.data.languages.length > 0 && selectedLanguage === 'de') {
+        // Keep 'de' if it exists in the available languages, otherwise use first
+        if (!res.data.languages.includes('de')) {
+          setSelectedLanguage(res.data.languages[0]);
+        }
+      } else if (res.data.languages.length > 0 && !selectedLanguage) {
+        // If no language selected, prefer 'de' if available
+        if (res.data.languages.includes('de')) {
+          setSelectedLanguage('de');
+        } else {
+          setSelectedLanguage(res.data.languages[0]);
+        }
       }
     } catch (err) {
       console.error('Error loading languages');
@@ -88,16 +121,26 @@ function ReviewTranslations() {
   const loadProposalsAndTranslations = async (lang) => {
     try {
       setLoading(true);
-      
+
       // Load all pending proposals for this language
-      const proposalsRes = await getAllProposals({ 
-        language: lang, 
-        status: 'pending' 
+      const proposalsRes = await getAllProposals({
+        language: lang,
+        status: 'pending'
       });
-      
+
       // Load original translations for comparison
       const translationsRes = await getTranslations(lang);
-      
+
+      // Load English translations for reference
+      let englishRes = null;
+      try {
+        englishRes = await getTranslations('en');
+        setEnglishTranslations(englishRes.data.content);
+      } catch (err) {
+        console.log('English translations not available');
+        setEnglishTranslations({});
+      }
+
       setProposals(proposalsRes.data);
       setOriginalTranslations(translationsRes.data.content);
       
@@ -105,7 +148,16 @@ function ReviewTranslations() {
       // Group proposals by screen name (from populated screen object)
       const grouped = {};
       proposalsRes.data.forEach(proposal => {
-        const screenName = proposal.screen?.name || 'Unknown'; // Screen name from populated object
+        // Try multiple ways to get screen name
+        let screenName = 'Unassigned';
+        if (proposal.screen?.name) {
+          screenName = proposal.screen.name;
+        } else if (proposal.screenId) {
+          screenName = `Screen ${proposal.screenId}`;
+        } else if (proposal.screen) {
+          screenName = proposal.screen.toString();
+        }
+
         const screenKey = `${screenName}.${proposal.key}`;
         
         
@@ -134,17 +186,30 @@ function ReviewTranslations() {
 
   const handleApproveProposal = async (proposalId, screen, key) => {
     setProcessingIds(prev => new Set([...prev, proposalId]));
-    
+
+    // Optimistic update: decrease count immediately for better UX
+    setLanguageCounts(prev => ({
+      ...prev,
+      [selectedLanguage]: Math.max(0, (prev[selectedLanguage] || 0) - 1)
+    }));
+
     try {
       await approveProposal(proposalId);
-      
+
+      // Small delay to ensure backend has processed the change
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Reload proposals to see updated state
       await loadProposalsAndTranslations(selectedLanguage);
+
+      // Reload counts for all languages to ensure accuracy
       await loadLanguageCounts();
-      
+
     } catch (err) {
       console.error('Error approving proposal:', err);
       alert('Error approving proposal');
+      // Reload counts in case of error to revert optimistic update
+      await loadLanguageCounts();
     } finally {
       setProcessingIds(prev => {
         const newSet = new Set(prev);
@@ -156,19 +221,32 @@ function ReviewTranslations() {
 
   const handleRejectProposal = async (proposalId) => {
     if (!confirm('Are you sure you want to reject this proposal?')) return;
-    
+
     setProcessingIds(prev => new Set([...prev, proposalId]));
-    
+
+    // Optimistic update: decrease count immediately for better UX
+    setLanguageCounts(prev => ({
+      ...prev,
+      [selectedLanguage]: Math.max(0, (prev[selectedLanguage] || 0) - 1)
+    }));
+
     try {
       await rejectProposal(proposalId);
-      
+
+      // Small delay to ensure backend has processed the change
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Reload proposals
       await loadProposalsAndTranslations(selectedLanguage);
+
+      // Reload counts for all languages to ensure accuracy
       await loadLanguageCounts();
-      
+
     } catch (err) {
       console.error('Error rejecting proposal:', err);
       alert('Error rejecting proposal');
+      // Reload counts in case of error to revert optimistic update
+      await loadLanguageCounts();
     } finally {
       setProcessingIds(prev => {
         const newSet = new Set(prev);
@@ -255,9 +333,17 @@ function ReviewTranslations() {
   const getLanguageFlag = (lang) => {
     const flags = {
       'en': '🇬🇧',
+      'EN': '🇬🇧',
+      'es': '🇪🇸',
+      'ES': '🇪🇸',
       'de': '🇩🇪',
+      'DE': '🇩🇪',
       'fr': '🇫🇷',
-      'it': '🇮🇹'
+      'FR': '🇫🇷',
+      'it': '🇮🇹',
+      'IT': '🇮🇹',
+      'pt': '🇵🇹',
+      'PT': '🇵🇹'
     };
     return flags[lang] || '🌐';
   };
@@ -386,17 +472,33 @@ function ReviewTranslations() {
                 {expandedScreens.has(screenName) && (
                   <div className="border-t border-gray-100">
                     <div className="divide-y divide-gray-50">
-                      {Object.values(groupedProposals[screenName]).map(item => (
+                      {Object.values(groupedProposals[screenName]).map(item => {
+                        // Get flattened English translations same as in Translations page
+                        const flatEnglishTranslations = flattenObject(englishTranslations);
+                        const englishValue = String(flatEnglishTranslations[item.key] || '');
+
+                        return (
                         <div key={item.key} className="px-6 py-4 transition-colors duration-300">
                           <div className="mb-3">
-                            {/* Original translation first */}
+                            {/* Translation key */}
+                            <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded text-gray-600 mb-2 inline-block">
+                              {item.key}
+                            </span>
+
+                            {/* English reference */}
+                            {englishValue && (
+                              <div className="mb-2">
+                                <p className="text-sm text-gray-600 break-words">
+                                  <strong>🇬🇧 EN:</strong> {englishValue}
+                                </p>
+                              </div>
+                            )}
+
+                            {/* Current translation in selected language */}
                             <div className="mb-2">
                               <p className="text-base text-gray-800 break-words font-medium">
-                                <strong>Original:</strong> {item.originalValue}
+                                <strong>{getLanguageFlag(selectedLanguage)} {selectedLanguage.toUpperCase()} Current:</strong> {item.originalValue}
                               </p>
-                              <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded text-gray-600 mt-1 inline-block">
-                                {item.key}
-                              </span>
                             </div>
                           </div>
 
@@ -462,7 +564,8 @@ function ReviewTranslations() {
                             </div>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

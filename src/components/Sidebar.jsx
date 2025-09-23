@@ -33,6 +33,9 @@ function Sidebar({ user, setUser, isCollapsed, setIsCollapsed }) {
     }
   };
 
+  // Expose loadProposalsCount function globally for other components
+  window.refreshProposalsCount = loadProposalsCount;
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     setUser(null);
