@@ -55,10 +55,10 @@ function ReviewTranslations() {
           loadLanguageCounts()
         ]);
       } catch (error) {
-        console.error('Error loading initial data:', error);
+        // Error loading initial data
         // Retry once after a short delay
         setTimeout(() => {
-          console.log('Retrying initial data load...');
+          // Retrying initial data load
           loadLanguages();
           loadLanguageCounts();
         }, 1000);
@@ -109,7 +109,7 @@ function ReviewTranslations() {
         }
       }
     } catch (err) {
-      console.error('Error loading languages');
+      // Error loading languages
     }
   };
 
@@ -142,19 +142,19 @@ function ReviewTranslations() {
       
       setLanguageCounts(counts);
     } catch (err) {
-      console.error('Error loading language counts');
+      // Error loading language counts
     }
   };
 
   const loadProposalsAndTranslations = async (lang) => {
     if (!lang) {
-      console.warn('No language specified for loading proposals');
+      // No language specified for loading proposals
       return;
     }
 
     try {
       setLoading(true);
-      console.log(`🔄 Loading proposals for language: ${lang}`);
+      // Loading proposals for language
 
       // Load all data in parallel for better performance
       const promises = [
@@ -166,7 +166,7 @@ function ReviewTranslations() {
       try {
         promises.push(getTranslations('en'));
       } catch (err) {
-        console.log('English translations not available');
+        // English translations not available
       }
 
       const results = await Promise.all(promises);
@@ -217,14 +217,14 @@ function ReviewTranslations() {
       
       setGroupedProposals(grouped);
     } catch (err) {
-      console.error('Error loading proposals:', err);
+      // Error loading proposals
 
       // Show user-friendly error message
       if (err.response?.status === 401) {
         alert('Session expired. Please login again.');
       } else {
         // Retry once after delay
-        console.log('Retrying proposals load...');
+        // Retrying proposals load
         setTimeout(() => {
           if (selectedLanguage === lang) {
             loadProposalsAndTranslations(lang);
@@ -258,7 +258,7 @@ function ReviewTranslations() {
       await loadLanguageCounts();
 
     } catch (err) {
-      console.error('Error approving proposal:', err);
+      // Error approving proposal
       alert('Error approving proposal');
       // Reload counts in case of error to revert optimistic update
       await loadLanguageCounts();
@@ -295,7 +295,7 @@ function ReviewTranslations() {
       await loadLanguageCounts();
 
     } catch (err) {
-      console.error('Error rejecting proposal:', err);
+      // Error rejecting proposal
       alert('Error rejecting proposal');
       // Reload counts in case of error to revert optimistic update
       await loadLanguageCounts();
@@ -345,7 +345,7 @@ function ReviewTranslations() {
       document.body.removeChild(a);
 
     } catch (err) {
-      console.error('Error downloading translations:', err);
+      // Error downloading translations
       alert('Error downloading translations ZIP file');
     } finally {
       setDownloading(false);

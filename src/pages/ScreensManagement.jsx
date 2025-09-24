@@ -220,8 +220,7 @@ function ScreensManagement() {
       }
     }
 
-    // Log when we can't find metadata for a key
-    console.warn(`⚠️ No file metadata found for key: ${key}, section: ${section}`);
+    // No file metadata found for key
     return null;
   };
 
@@ -246,16 +245,12 @@ function ScreensManagement() {
       setLoading(true);
       const res = await getTranslations(lang);
 
-      // Log the entire response to see what we're getting
-      console.log('🔍 Loading translations for language:', lang.toUpperCase());
-      console.log('📡 Full API response:', res.data);
+      // Process API response
 
       const translationsData = res.data.content;
       const filesData = res.data.files || {};
 
-      // Log repository and files being loaded
-      console.log('📦 Files metadata received:', filesData);
-      console.log('📊 Number of files:', Object.keys(filesData).length);
+      // Process files metadata
 
       // Count total repositories
       const repos = new Set();
@@ -263,30 +258,18 @@ function ScreensManagement() {
         const repo = fileInfo.repo || 'unknown';
         repos.add(repo);
         const path = fileInfo.path || fileName;
-        console.log(`  📁 Repository: ${repo}, File: ${path}`);
+        // Process repository and file
       });
-      console.log(`🏢 Total repositories: ${repos.size}`, Array.from(repos));
+      // Total repositories processed
 
-      // Log translation structure
+      // Process translation structure
       if (translationsData) {
         const sections = Object.keys(translationsData);
-        console.log('📚 Translation sections found:', sections);
-        console.log('📈 Total sections:', sections.length);
-
         let totalKeys = 0;
         sections.forEach(section => {
           const keys = translationsData[section] ? Object.keys(translationsData[section]) : [];
           totalKeys += keys.length;
-          console.log(`  📄 Section "${section}" has ${keys.length} keys`);
-          if (keys.length <= 5) {
-            console.log(`     Keys:`, keys);
-          } else {
-            console.log(`     Sample keys:`, keys.slice(0, 5), `... and ${keys.length - 5} more`);
-          }
         });
-        console.log(`🔢 Total keys across all sections: ${totalKeys}`);
-      } else {
-        console.warn('⚠️ No translation data received!');
       }
 
       setTranslations(translationsData);
@@ -294,9 +277,9 @@ function ScreensManagement() {
 
       // Flatten the nested translations for UI display
       const flattened = flattenObject(translationsData);
-      console.log(`✅ Total translation keys loaded: ${Object.keys(flattened).length}`);
+      // Translation keys loaded successfully
 
-      // Log the actual keys to see what's being displayed
+      // Process keys by section
       const keysBySection = {};
       Object.keys(flattened).forEach(key => {
         const section = key.split('.')[0];
@@ -304,16 +287,6 @@ function ScreensManagement() {
           keysBySection[section] = [];
         }
         keysBySection[section].push(key);
-      });
-
-      console.log('🗂️ Keys grouped by section:');
-      Object.entries(keysBySection).forEach(([section, keys]) => {
-        console.log(`  📂 ${section}: ${keys.length} keys displayed in UI`);
-        if (keys.length <= 3) {
-          console.log(`     Keys: ${keys.join(', ')}`);
-        } else {
-          console.log(`     Sample keys: ${keys.slice(0, 3).join(', ')}...`);
-        }
       });
 
       setFlatTranslations(flattened);
@@ -329,14 +302,13 @@ function ScreensManagement() {
       const response = await getScreens();
       const screens = response.data;
 
-      console.log('🖥️  Loading custom screens configuration...');
-      console.log('📊 Total screens from database:', screens.length);
+      // Loading custom screens configuration
 
       // Convert screens to the format expected by the UI
       const screenGroups = {};
       screens.forEach(screen => {
         const keyCount = screen.keys ? screen.keys.length : 0;
-        console.log(`  🗂️  Screen "${screen.name}": ${keyCount} keys assigned`);
+        // Process screen keys
         screenGroups[screen.name] = new Set(screen.keys || []);
       });
 
@@ -364,16 +336,7 @@ function ScreensManagement() {
         const allKeys = Object.keys(flattenObject(translations));
         const unassigned = allKeys.filter(key => !assignedKeys.has(key));
 
-        console.log(`🔑 Total translation keys: ${allKeys.length}`);
-        console.log(`✅ Assigned keys: ${assignedKeys.size}`);
-        console.log(`❌ Unassigned keys: ${unassigned.length}`);
-
-        if (unassigned.length > 0 && unassigned.length <= 20) {
-          console.log('📝 Unassigned keys:', unassigned);
-        } else if (unassigned.length > 20) {
-          console.log(`📝 First 20 unassigned keys:`, unassigned.slice(0, 20));
-          console.log(`   ... and ${unassigned.length - 20} more`);
-        }
+        // Process key assignments
 
         setUnassignedFlags(new Set(unassigned));
       }

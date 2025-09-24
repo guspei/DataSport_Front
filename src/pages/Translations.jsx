@@ -93,7 +93,7 @@ function Translations({ user }) {
     const flattened = {};
 
     if (!obj || typeof obj !== 'object') {
-      console.log('flattenObject: invalid input', { obj, type: typeof obj });
+      // Invalid input
       return flattened;
     }
 
@@ -192,7 +192,7 @@ function Translations({ user }) {
 
   // Save current translation
   const saveCurrentTranslation = async (originalScreen, key) => {
-    console.log('🚀 saveCurrentTranslation called with:', { originalScreen, key });
+    // Save current translation
     const translationKey = `${originalScreen}.${key}`;
     setSavingKeys(prev => new Set([...prev, translationKey]));
 
@@ -227,22 +227,13 @@ function Translations({ user }) {
         }
       }
 
-      console.log('Creating proposal:', {
-        originalScreen,
-        key,
-        selectedLanguage,
-        currentValue,
-        originalValue,
-        isUnassignedKey,
-        screenId: proposalData.screenId,
-        proposalData
-      });
+      // Creating proposal
 
-      console.log('About to create proposal with data:', proposalData);
+      // About to create proposal
 
       const createResponse = await createProposal(proposalData);
 
-      console.log('Proposal created successfully:', createResponse.data);
+      // Proposal created successfully
 
       // Refresh proposals count and data
       if (window.refreshProposalsCount) {
@@ -251,7 +242,7 @@ function Translations({ user }) {
 
       // Reload user proposals to see the new one
       const proposalsRes = await getMyProposals(selectedLanguage);
-      console.log('📋 Proposals after save:', proposalsRes.data);
+      // Proposals loaded after save
       setUserProposals(proposalsRes.data);
 
       // Clear the edited value since it's now saved as a proposal
@@ -273,22 +264,7 @@ function Translations({ user }) {
 
       // Success - proposal created (no annoying alert)
     } catch (err) {
-      console.error('❌ Error saving translation:', err);
-      console.error('❌ Error details:', {
-        message: err.message,
-        response: err.response?.data,
-        status: err.response?.status,
-        config: err.config,
-        originalScreen,
-        key,
-        translationKey,
-        proposalData: {
-          language: selectedLanguage,
-          key,
-          originalValue: flattenObject(originalTranslations)[key],
-          proposedValue: editedValues[originalScreen]?.[key]
-        }
-      });
+      console.error('Error saving translation:', err);
 
       // Show user-friendly error message
       const errorMessage = err.response?.data?.message || err.message || 'Unknown error occurred';
@@ -437,7 +413,7 @@ function Translations({ user }) {
       const res = await getProposalsCount();
       setPendingProposalsCount(res.data.count);
     } catch (err) {
-      console.error('Error loading proposals count');
+      // Error loading proposals count
     }
   };
 
@@ -459,7 +435,7 @@ function Translations({ user }) {
       setCustomScreens(screenGroups);
       
     } catch (error) {
-      console.error('Error loading screens from database:', error);
+      // Error loading screens from database
       // On error, keep empty state - will trigger automatic screen generation
       setCustomScreens({});
       setScreensMap(new Map());
@@ -482,27 +458,19 @@ function Translations({ user }) {
         const allKeys = Object.keys(flatTranslations);
         const unassigned = allKeys.filter(key => !assignedKeys.has(key));
 
-        console.log('calculateUnassignedKeys - with screens:', {
-          allKeysCount: allKeys.length,
-          assignedKeysCount: assignedKeys.size,
-          unassignedCount: unassigned.length,
-          screensMapSize: screensMap.size
-        });
+        // Calculate unassigned keys with screens
 
         setUnassignedKeys(unassigned);
       } else {
         // Fallback: if no screens configured, all keys are unassigned
         const allKeys = Object.keys(flatTranslations);
 
-        console.log('calculateUnassignedKeys - fallback:', {
-          allKeysCount: allKeys.length,
-          translationsKeys: Object.keys(translations)
-        });
+        // Calculate unassigned keys - fallback
 
         setUnassignedKeys(allKeys);
       }
     } else {
-      console.log('calculateUnassignedKeys - no translations');
+      // No translations to calculate
       setUnassignedKeys([]);
     }
   };
@@ -526,7 +494,7 @@ function Translations({ user }) {
         }
       }
     } catch (err) {
-      console.error('Error loading languages');
+      // Error loading languages
     }
   };
 
@@ -535,7 +503,7 @@ function Translations({ user }) {
       const res = await getTranslations('en');
       setEnglishTranslations(res.data.content);
     } catch (err) {
-      console.error('Error loading English translations');
+      // Error loading English translations
     }
   };
 
@@ -549,24 +517,14 @@ function Translations({ user }) {
         getMyProposals(lang)
       ]);
 
-      console.log('loadTranslations for', lang, ':', {
-        translationsKeys: Object.keys(res.data.content),
-        flattenedCount: Object.keys(flattenObject(res.data.content)).length,
-        fullResponse: res.data,
-        contentSample: Object.keys(res.data.content).slice(0, 3).map(key => ({
-          key,
-          type: typeof res.data.content[key],
-          keys: typeof res.data.content[key] === 'object' ? Object.keys(res.data.content[key]).slice(0, 3) : null
-        })),
-        filesMetadata: res.data.files // Log the new metadata
-      });
+      // Translations loaded
 
       setOriginalTranslations(res.data.content);
       setOriginalGithubTranslations(originalRes.data.content);
       setTranslations(res.data.content);
       setFilesMetadata(res.data.files || {}); // Store file metadata
 
-      console.log('📋 User proposals loaded:', proposalsRes.data);
+      // User proposals loaded
       setUserProposals(proposalsRes.data);
 
       // Initialize edited values with proposals or originals (nested structure)
@@ -588,17 +546,7 @@ function Translations({ user }) {
         const proposalKey = `${lang}.${screen}.${key}`;
         const proposal = proposalsRes.data[proposalKey];
 
-        // Debug specific keys
-        if (key.includes('today_training')) {
-          console.log('🔍 Checking proposal on load:', {
-            key,
-            screen,
-            proposalKey,
-            proposal,
-            hasProposal: !!proposal,
-            proposalStatus: proposal?.status
-          });
-        }
+        // Check proposal on load
 
         // Determine the initial value to display
         let displayValue = value;
@@ -615,7 +563,7 @@ function Translations({ user }) {
       setInitialValues(initialValuesSnapshot); // Store the initial state
       
     } catch (err) {
-      console.error('Error loading translations');
+      // Error loading translations
     } finally {
       setLoading(false);
     }
@@ -646,7 +594,7 @@ function Translations({ user }) {
       document.body.removeChild(a);
 
     } catch (err) {
-      console.error('Error downloading translations structure:', err);
+      // Error downloading translations structure
       alert('Error downloading translations ZIP file');
     } finally {
       setDownloading(false);
@@ -673,7 +621,7 @@ function Translations({ user }) {
   };
 
   const handleTranslationChange = (screen, key, value) => {
-    console.log('✏️ handleTranslationChange:', { screen, key, value });
+    // Handle translation change
     setEditedValues(prev => {
       const newState = {
         ...prev,
@@ -682,7 +630,7 @@ function Translations({ user }) {
           [key]: value
         }
       };
-      console.log('📝 Updated editedValues:', newState);
+      // Updated edited values
       return newState;
     });
   };
@@ -712,17 +660,7 @@ function Translations({ user }) {
       return currentValue !== originalValue;
     })();
 
-    // Only log when there's actually a modification (and limit logging)
-    if (result && Math.random() < 0.1) { // Only log 10% of the time to reduce spam
-      console.log(`🔍 isModified(${screen}, ${key}):`, {
-        proposalKey,
-        originalValue,
-        currentValue,
-        editedValue: editedValues[screen]?.[key],
-        hasProposal: !!proposal,
-        result
-      });
-    }
+    // Check if modified
 
     return result;
   };
@@ -779,7 +717,7 @@ function Translations({ user }) {
       }
 
     } catch (err) {
-      console.error('Error saving proposal:', err);
+      // Error saving proposal
       alert('Error saving proposal');
     } finally {
       setSavingKeys(prev => {
@@ -815,7 +753,7 @@ function Translations({ user }) {
         window.refreshProposalsCount();
       }
     } catch (err) {
-      console.error('Error deleting proposal:', err);
+      // Error deleting proposal
       alert('Error deleting proposal');
     }
   };
@@ -1236,22 +1174,9 @@ function Translations({ user }) {
                               const proposal = userProposals[proposalKey];
                               const hasPendingProposal = proposal && proposal.status === 'pending';
 
-                              // Debug log for testing - check all proposal keys format
-                              if (Object.keys(userProposals).length > 0 && Math.random() < 0.01) {
-                                console.log('📦 Sample proposal keys:', Object.keys(userProposals).slice(0, 3));
-                              }
+                              // Check proposal keys format
 
-                              // Debug specific keys
-                              if (key.includes('today_training') && Math.random() < 0.5) {
-                                console.log('🔍 Checking proposal in render:', {
-                                  originalScreen,
-                                  key,
-                                  proposalKey,
-                                  proposal,
-                                  hasPendingProposal,
-                                  userProposalsKeys: Object.keys(userProposals).filter(k => k.includes(key.split('.').pop()))
-                                });
-                              }
+                              // Check proposal in render
                               const modified = isModified(originalScreen, key);
                               const isSaving = savingKeys.has(proposalKey);
                               const currentValue = editedValues[originalScreen]?.[key] || currentTranslationValue;
@@ -1263,18 +1188,7 @@ function Translations({ user }) {
                               // Only show button when the current value differs from what was initially in the field
                               const shouldShowSaveButton = currentValue !== initialValue;
 
-                              // Debug the button visibility logic
-                              if (key.includes('today_training') && Math.random() < 0.3) {
-                                console.log('🔘 Button visibility check:', {
-                                  key,
-                                  shouldShowSaveButton,
-                                  hasPendingProposal,
-                                  currentValue: currentValue?.substring(0, 50),
-                                  initialValue: initialValue?.substring(0, 50),
-                                  proposalValue: proposal?.proposedValue?.substring(0, 50),
-                                  originalValue: currentTranslationValue?.substring(0, 50)
-                                });
-                              }
+                              // Check button visibility
 
                               // Check if current translation (with approved proposals) differs from original GitHub version
                               const originalGithubValue = String(flatOriginalGithubTranslations[key] || '');

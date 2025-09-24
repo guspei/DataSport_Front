@@ -84,8 +84,7 @@ function MyProposals({ user }) {
         // Use the old endpoint for simple language filtering (which exists)
         response = await getMyProposals(selectedLanguage);
 
-        console.log('📋 Raw response from getMyProposals:', response);
-        console.log('📋 Response data:', JSON.stringify(response?.data, null, 2));
+        // Process response from getMyProposals
 
         // Transform old response format to new format
         if (response?.data) {
@@ -117,7 +116,7 @@ function MyProposals({ user }) {
             proposalsList.push(...response.data);
           }
 
-          console.log('📋 Transformed proposals list:', proposalsList);
+          // Transformed proposals list
 
           response = {
             data: {
@@ -143,8 +142,7 @@ function MyProposals({ user }) {
           limit
         });
 
-        console.log('📋 Response from new endpoint:', response);
-        console.log('📋 New endpoint data:', JSON.stringify(response?.data, null, 2));
+        // Response from new endpoint
       }
 
       // Handle double-nested data structure from backend
@@ -152,16 +150,16 @@ function MyProposals({ user }) {
 
       // Check if backend is returning data.data instead of just data
       if (actualData?.data) {
-        console.log('📦 Backend returned double-nested data, extracting inner data');
+        // Backend returned double-nested data, extracting inner data
         actualData = actualData.data;
       }
 
       // Safe access with fallbacks
       if (actualData?.proposals) {
-        console.log('✅ Setting proposals:', actualData.proposals.length, 'items');
+        // Setting proposals
         setProposals(actualData.proposals);
       } else {
-        console.warn('⚠️ No proposals found in response');
+        // No proposals found in response
         setProposals([]);
       }
 
@@ -171,14 +169,14 @@ function MyProposals({ user }) {
         setTotalPages(1);
       }
     } catch (error) {
-      console.error('Error loading proposals:', error);
+      // Error loading proposals
       // Set safe defaults on error
       setProposals([]);
       setTotalPages(1);
 
       // Retry once after delay if not 401
       if (error.response?.status !== 401) {
-        console.log('Retrying proposals load...');
+        // Retrying proposals load
         setTimeout(() => {
           loadProposals();
         }, 1500);
@@ -193,36 +191,35 @@ function MyProposals({ user }) {
       // THIS API ENDPOINT NEEDS TO BE IMPLEMENTED
       const response = await getMyProposalsStats();
 
-      console.log('📊 Statistics response:', response);
-      console.log('📊 Statistics data:', JSON.stringify(response?.data, null, 2));
+      // Statistics response received
 
       // Handle double-nested data structure from backend
       let actualData = response?.data;
 
       // Check if backend is returning data.data instead of just data
       if (actualData?.data) {
-        console.log('📦 Backend returned double-nested data for stats, extracting inner data');
+        // Backend returned double-nested data for stats, extracting inner data
         actualData = actualData.data;
       }
 
       // Now check for the overall statistics
       if (actualData?.overall) {
-        console.log('✅ Setting statistics:', actualData.overall);
+        // Setting statistics
         setStatistics(actualData.overall);
       } else if (actualData && typeof actualData === 'object') {
         // Try to use the data directly if it has the expected properties
         if ('total' in actualData || 'pending' in actualData) {
-          console.log('✅ Using data directly as statistics');
+          // Using data directly as statistics
           setStatistics(actualData);
         } else {
           // Keep default values if response is invalid
-          console.warn('Invalid statistics response structure');
+          // Invalid statistics response structure
         }
       } else {
-        console.warn('Invalid statistics response');
+        // Invalid statistics response
       }
     } catch (error) {
-      console.error('Error loading statistics:', error);
+      // Error loading statistics
       // Statistics will keep the default values set in state
 
       // Retry once after delay if not 401
@@ -253,7 +250,7 @@ function MyProposals({ user }) {
       setEditingProposal(null);
       setEditValue('');
     } catch (error) {
-      console.error('Error updating proposal:', error);
+      // Error updating proposal
       alert('Error updating proposal');
     }
   };
@@ -269,7 +266,7 @@ function MyProposals({ user }) {
       await loadProposals();
       await loadStatistics();
     } catch (error) {
-      console.error('Error deleting proposal:', error);
+      // Error deleting proposal
       alert('Error deleting proposal');
     }
   };
