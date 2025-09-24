@@ -53,8 +53,8 @@ function App() {
               <Navigate to="/" />
           } />
           <Route path="training-plans" element={
-            (user?.roles?.includes('admin') || user?.roles?.includes('training_expert')) ? 
-              <TrainingPlans user={user} /> : 
+            (user?.roles?.includes('admin') || user?.roles?.includes('training_expert')) ?
+              <TrainingPlans user={user} /> :
               <Navigate to="/" />
           } />
           <Route path="users" element={

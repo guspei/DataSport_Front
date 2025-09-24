@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { marked } from 'marked';
-import { 
-  getTrainingPlansUsers, 
-  getTrainingPlan 
+import ChatGPTPromptPanelRight from '../components/ChatGPTPromptPanelRight';
+import {
+  getTrainingPlansUsers,
+  getTrainingPlan
 } from '../services/api';
 
 function TrainingPlans() {
@@ -13,6 +14,8 @@ function TrainingPlans() {
   const [selectedWeek, setSelectedWeek] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [showAIButton, setShowAIButton] = useState(false);
 
   // Load users on component mount
   useEffect(() => {
@@ -35,6 +38,7 @@ function TrainingPlans() {
       setSelectedUserData(null);
       setTrainingPlan(null);
       setSelectedWeek(null);
+      setShowAIButton(false);
       return;
     }
 
@@ -49,6 +53,7 @@ function TrainingPlans() {
       setSelectedUserData(data.user);
       setTrainingPlan(data.trainingPlan);
       setSelectedWeek(null);
+      setShowAIButton(true);
     } catch (err) {
       setError('Error loading training plan');
       console.error('Error loading training plan:', err);
@@ -165,7 +170,8 @@ function TrainingPlans() {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm">
+    <>
+      <div className="bg-white rounded-lg shadow-sm">
       {/* Header */}
       <div className="border-b bg-white p-6">
         <div className="space-y-4">
@@ -390,6 +396,30 @@ function TrainingPlans() {
         )}
       </div>
     </div>
+
+    {/* AI Assistant Button - Fixed on Right Side */}
+    {showAIButton && !isPanelOpen && (
+      <button
+        onClick={() => setIsPanelOpen(true)}
+        className="fixed right-0 top-1/2 -translate-y-1/2 bg-milo-red text-white p-3 rounded-l-lg shadow-lg hover:bg-milo-dark transition-all hover:pr-4 z-30 group"
+      >
+        <div className="flex items-center gap-2">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+          <span className="hidden group-hover:inline text-sm font-medium">AI</span>
+        </div>
+      </button>
+    )}
+
+    {/* ChatGPT Panel */}
+    <ChatGPTPromptPanelRight
+      isOpen={isPanelOpen}
+      onClose={() => setIsPanelOpen(false)}
+      selectedUser={selectedUserData}
+      trainingPlan={trainingPlan}
+    />
+  </>
   );
 }
 
