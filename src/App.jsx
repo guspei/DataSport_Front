@@ -11,6 +11,10 @@ import Analytics from './pages/Analytics';
 import TrainingPlans from './pages/TrainingPlans';
 import Layout from './components/Layout';
 import { getMe } from './services/api';
+import { setupProductionMode } from './utils/security';
+
+// Disable console logs in production
+setupProductionMode();
 
 function App() {
   const [user, setUser] = useState(null);

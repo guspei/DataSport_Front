@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { sanitizeInput, validatePromptLength, sanitizePromptVariables } from '../utils/security';
 
 function ChatGPTPromptPanelRight({ isOpen, onClose, selectedUser, trainingPlan }) {
   const [prompts, setPrompts] = useState([
@@ -102,10 +103,11 @@ function ChatGPTPromptPanelRight({ isOpen, onClose, selectedUser, trainingPlan }
   }, [selectedPrompt]);
 
   const handleCreateNewPrompt = () => {
-    if (newPromptName.trim()) {
+    const sanitizedName = sanitizeInput(newPromptName.trim());
+    if (sanitizedName && sanitizedName.length <= 100) {
       const newPrompt = {
         id: Date.now(),
-        name: newPromptName.trim(),
+        name: sanitizedName,
         content: ''
       };
       setPrompts([...prompts, newPrompt]);
@@ -113,6 +115,8 @@ function ChatGPTPromptPanelRight({ isOpen, onClose, selectedUser, trainingPlan }
       setPromptText('');
       setIsCreatingNew(false);
       setNewPromptName('');
+    } else if (sanitizedName.length > 100) {
+      alert('Prompt name must be less than 100 characters');
     }
   };
 
@@ -125,18 +129,31 @@ function ChatGPTPromptPanelRight({ isOpen, onClose, selectedUser, trainingPlan }
   };
 
   const handleSavePrompt = () => {
-    if (selectedPrompt) {
+    if (selectedPrompt && promptText) {
+      if (!validatePromptLength(promptText)) {
+        alert('Prompt is too long. Maximum 5000 characters allowed.');
+        return;
+      }
+
+      const sanitizedContent = sanitizePromptVariables(promptText);
       setPrompts(prompts.map(p =>
         p.id === selectedPrompt.id
-          ? { ...p, content: promptText }
+          ? { ...p, content: sanitizedContent }
           : p
       ));
-      console.log('Prompt saved successfully');
+      setPromptText(sanitizedContent);
+      // Success feedback without console.log
     }
   };
 
   const handleExecutePrompt = () => {
-    console.log('Executing prompt with ChatGPT:', promptText);
+    if (!validatePromptLength(promptText)) {
+      alert('Prompt is too long. Maximum 5000 characters allowed.');
+      return;
+    }
+
+    const sanitizedPrompt = sanitizePromptVariables(promptText);
+    // Execute with sanitized prompt
     alert('Prompt sent to ChatGPT (mockup)');
   };
 
@@ -179,12 +196,15 @@ function ChatGPTPromptPanelRight({ isOpen, onClose, selectedUser, trainingPlan }
   };
 
   const savePromptName = () => {
-    if (editingPromptName.trim()) {
+    const sanitizedName = sanitizeInput(editingPromptName.trim());
+    if (sanitizedName && sanitizedName.length <= 100) {
       setPrompts(prompts.map(p =>
         p.id === editingPromptId
-          ? { ...p, name: editingPromptName.trim() }
+          ? { ...p, name: sanitizedName }
           : p
       ));
+    } else if (sanitizedName.length > 100) {
+      alert('Prompt name must be less than 100 characters');
     }
     setEditingPromptId(null);
     setEditingPromptName('');
@@ -471,10 +491,19 @@ function ChatGPTPromptPanelRight({ isOpen, onClose, selectedUser, trainingPlan }
 
               <textarea
                 value={promptText}
-                onChange={(e) => setPromptText(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.length <= 5000) {
+                    setPromptText(value);
+                  }
+                }}
                 placeholder="Enter your prompt here... Use variables like {user_name} or {training_plan_week_1} to insert training data."
                 className="w-full h-40 px-4 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-milo-red resize-none"
+                maxLength={5000}
               />
+              <div className="text-xs text-gray-500 mt-1 text-right">
+                {promptText.length} / 5000 characters
+              </div>
 
               <div className="flex gap-3 mt-3">
                 <button
