@@ -106,8 +106,18 @@ export const getProposals = (params) =>
 export const getAllProposals = (params) =>
   api.get('/proposals/all', { params });
 
-export const getMyProposals = (language) =>
-  api.get('/proposals/my', { params: { language } });
+/**
+ * Get user's proposals - supports both simple language filter and advanced filters
+ * @param {string|Object} languageOrParams - Either a language string or params object
+ */
+export const getMyProposals = (languageOrParams) => {
+  // Support both old usage (string) and new usage (object)
+  if (typeof languageOrParams === 'string') {
+    return api.get('/proposals/my', { params: { language: languageOrParams } });
+  }
+  // For the My Proposals page with advanced filtering
+  return api.get('/proposals/mine', { params: languageOrParams });
+};
 
 export const createProposal = (proposalData) =>
   api.post('/proposals', proposalData);
@@ -134,6 +144,13 @@ export const downloadAllTranslations = () =>
 export const downloadTranslationsWithStructure = () =>
   api.get('/translations/download/structure');
 
+// Download translations as ZIP file - Binary format
+export const downloadTranslationsZip = () =>
+  api.get('/translations/download/zip', { responseType: 'blob' });
+
+export const downloadTranslationsWithStructureZip = () =>
+  api.get('/translations/download/structure-zip', { responseType: 'blob' });
+
 // Training Plans
 export const getTrainingPlansUsers = () =>
   api.get('/training-plans/users');
@@ -149,5 +166,29 @@ export const getTrainingWeek = (userId, weekId) =>
 
 export const getTrainingPlansStats = () =>
   api.get('/training-plans/stats/overview');
+
+// MY PROPOSALS API ENDPOINTS - BACKEND NEEDS TO IMPLEMENT THESE
+// ============================================================
+
+/**
+ * Get statistics for user's proposals
+ * @param {Object} params - Query parameters
+ * @param {string} params.groupBy - Group results by (language/screen/status/month)
+ * @param {string} params.dateFrom - Start date ISO string
+ * @param {string} params.dateTo - End date ISO string
+ */
+export const getMyProposalsStats = (params) =>
+  api.get('/proposals/mine/stats', { params });
+
+/**
+ * Update a pending proposal (only by creator)
+ * @param {string} proposalId - Proposal ID
+ * @param {Object} data - Update data
+ * @param {string} data.proposedValue - New translation value
+ */
+export const updateProposal = (proposalId, data) =>
+  api.put(`/proposals/${proposalId}`, data);
+
+// Note: deleteProposal is already defined above in the file
 
 export default api;

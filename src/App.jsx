@@ -6,6 +6,7 @@ import Users from './pages/Users';
 import Translations from './pages/Translations';  // <-- Uncomment this
 import ReviewTranslations from './pages/ReviewTranslations';  // <-- Uncomment this
 import ScreensManagement from './pages/ScreensManagement';
+import MyProposals from './pages/MyProposals';
 import Analytics from './pages/Analytics';
 import TrainingPlans from './pages/TrainingPlans';
 import Layout from './components/Layout';
@@ -67,14 +68,19 @@ function App() {
               <Translations user={user} /> : 
               <Navigate to="/" />
           } />
+          <Route path="translations/my-proposals" element={
+            (user?.roles?.includes('translator') || user?.roles?.includes('translator_master') || user?.roles?.includes('admin')) ?
+              <MyProposals user={user} /> :
+              <Navigate to="/" />
+          } />
           <Route path="translations/review" element={
-            (user?.roles?.includes('translator_master') || user?.roles?.includes('admin')) ? 
-              <ReviewTranslations /> : 
+            (user?.roles?.includes('translator_master') || user?.roles?.includes('admin')) ?
+              <ReviewTranslations /> :
               <Navigate to="/" />
           } />
           <Route path="translations/screens" element={
-            (user?.roles?.includes('translator') || user?.roles?.includes('translator_master') || user?.roles?.includes('admin')) ? 
-              <ScreensManagement user={user} /> : 
+            (user?.roles?.includes('translator') || user?.roles?.includes('translator_master') || user?.roles?.includes('admin')) ?
+              <ScreensManagement user={user} /> :
               <Navigate to="/" />
           } />
           {/* ⚠️ END OF TRANSLATION ROUTES - DO NOT MODIFY */}

@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import JSZip from 'jszip';
 
 import {
   getTranslations,
@@ -12,6 +11,7 @@ import {
   getProposalsCount,
   downloadTranslations,
   downloadTranslationsWithStructure,
+  downloadTranslationsWithStructureZip,
   updateTranslation,
   getScreens
 } from '../services/api';
@@ -24,9 +24,11 @@ function Translations({ user }) {
   const [originalTranslations, setOriginalTranslations] = useState({});
   const [originalGithubTranslations, setOriginalGithubTranslations] = useState({});
   const [editedValues, setEditedValues] = useState({});
+  const [initialValues, setInitialValues] = useState({}); // Track initial values for comparison
   const [userProposals, setUserProposals] = useState({});
   const [pendingProposalsCount, setPendingProposalsCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [expandedScreens, setExpandedScreens] = useState(new Set());
   const [savingKeys, setSavingKeys] = useState(new Set());
   const [downloading, setDownloading] = useState(false);
@@ -36,6 +38,8 @@ function Translations({ user }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimeoutRef = useRef(null);
   const [filesMetadata, setFilesMetadata] = useState({}); // New: Store file metadata
   const scrollPositionRef = useRef(0);
   const shouldRestoreScrollRef = useRef(false);
@@ -46,12 +50,20 @@ function Translations({ user }) {
 
   useEffect(() => {
     const loadData = async () => {
-      await loadLanguages();
-      await loadCustomScreenConfiguration();
-      await loadEnglishTranslations();
+      setInitialLoading(true);
+      // Load in parallel for better performance
+      const promises = [
+        loadLanguages(),
+        loadCustomScreenConfiguration(),
+        loadEnglishTranslations()
+      ];
+
       if (isAdmin) {
-        await loadProposalsCount();
+        promises.push(loadProposalsCount());
       }
+
+      await Promise.all(promises);
+      setInitialLoading(false);
     };
     loadData();
   }, [isAdmin]);
@@ -66,6 +78,7 @@ function Translations({ user }) {
   useEffect(() => {
     calculateUnassignedKeys();
   }, [translations, screensMap]);
+
 
   // Auto-resize all textareas when content changes
   useEffect(() => {
@@ -335,62 +348,89 @@ function Translations({ user }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Search functionality
-  useEffect(() => {
-    if (!searchQuery.trim()) {
+  // Debounced search function
+  const performSearch = useCallback(() => {
+    const query = searchQuery.toLowerCase();
+    if (!query.trim()) {
       setSearchResults([]);
       setShowSearchResults(false);
+      setIsSearching(false);
       return;
     }
 
-    const results = [];
-    const query = searchQuery.toLowerCase();
+    setIsSearching(true);
 
-    // Flatten both translations objects for searching
-    const flatTranslations = flattenObject(translations);
-    const flatEnglishTranslations = flattenObject(englishTranslations);
+    // Use setTimeout to simulate async processing and avoid blocking UI
+    setTimeout(() => {
+      const results = [];
 
-    // Search through flattened translations
-    Object.entries(flatTranslations).forEach(([key, value]) => {
-      const englishValue = String(flatEnglishTranslations[key] || '');
-      const currentValue = String(value || '');
+      // Flatten both translations objects for searching
+      const flatTranslations = flattenObject(translations);
+      const flatEnglishTranslations = flattenObject(englishTranslations);
 
-      // Check if query matches key, English translation, or current language translation
-      if (
-        key.toLowerCase().includes(query) ||
-        englishValue.toLowerCase().includes(query) ||
-        currentValue.toLowerCase().includes(query)
-      ) {
-        // Find which screen this key belongs to
-        let screenName = key.split('.')[0]; // First part is the screen/section
+      // Search through flattened translations
+      Object.entries(flatTranslations).forEach(([key, value]) => {
+        const englishValue = String(flatEnglishTranslations[key] || '');
+        const currentValue = String(value || '');
 
-        // Check if it's in custom screens or unassigned
-        if (Object.keys(customScreens).length > 0) {
-          let found = false;
-          Object.entries(customScreens).forEach(([customScreenName, keySet]) => {
-            if (keySet.has && keySet.has(key)) {
-              screenName = customScreenName;
-              found = true;
+        // Check if query matches key, English translation, or current language translation
+        if (
+          key.toLowerCase().includes(query) ||
+          englishValue.toLowerCase().includes(query) ||
+          currentValue.toLowerCase().includes(query)
+        ) {
+          // Find which screen this key belongs to
+          let screenName = key.split('.')[0]; // First part is the screen/section
+
+          // Check if it's in custom screens or unassigned
+          if (Object.keys(customScreens).length > 0) {
+            let found = false;
+            Object.entries(customScreens).forEach(([customScreenName, keySet]) => {
+              if (keySet.has && keySet.has(key)) {
+                screenName = customScreenName;
+                found = true;
+              }
+            });
+            if (!found && unassignedKeys.includes(key)) {
+              screenName = '__unassigned__';
             }
-          });
-          if (!found && unassignedKeys.includes(key)) {
-            screenName = '__unassigned__';
           }
+
+          results.push({
+            fullKey: key,
+            englishValue,
+            currentValue,
+            screen: screenName,
+            key
+          });
         }
+      });
 
-        results.push({
-          fullKey: key,
-          englishValue,
-          currentValue,
-          screen: screenName,
-          key
-        });
+      setSearchResults(results.slice(0, 10)); // Limit to 10 results
+      setShowSearchResults(true);
+      setIsSearching(false);
+    }, 0);
+  }, [searchQuery, translations, englishTranslations, customScreens, unassignedKeys]);
+
+  // Search functionality with debouncing
+  useEffect(() => {
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Set new timeout for debounced search
+    searchTimeoutRef.current = setTimeout(() => {
+      performSearch();
+    }, 300); // 300ms delay
+
+    // Cleanup
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
       }
-    });
-
-    setSearchResults(results.slice(0, 10)); // Limit to 10 results
-    setShowSearchResults(true);
-  }, [searchQuery, translations, englishTranslations, selectedLanguage, customScreens, unassignedKeys]);
+    };
+  }, [searchQuery, performSearch]);
 
   const loadProposalsCount = async () => {
     try {
@@ -502,9 +542,12 @@ function Translations({ user }) {
   const loadTranslations = async (lang) => {
     try {
       setLoading(true);
-      const res = await getTranslations(lang);
-      const originalRes = await getOriginalTranslations(lang);
-      const proposalsRes = await getMyProposals(lang);
+      // Load all data in parallel for better performance
+      const [res, originalRes, proposalsRes] = await Promise.all([
+        getTranslations(lang),
+        getOriginalTranslations(lang),
+        getMyProposals(lang)
+      ]);
 
       console.log('loadTranslations for', lang, ':', {
         translationsKeys: Object.keys(res.data.content),
@@ -522,10 +565,13 @@ function Translations({ user }) {
       setOriginalGithubTranslations(originalRes.data.content);
       setTranslations(res.data.content);
       setFilesMetadata(res.data.files || {}); // Store file metadata
+
+      console.log('📋 User proposals loaded:', proposalsRes.data);
       setUserProposals(proposalsRes.data);
-      
+
       // Initialize edited values with proposals or originals (nested structure)
       const initialEditedValues = {};
+      const initialValuesSnapshot = {}; // This will store the initial state for comparison
       const flatTranslations = flattenObject(res.data.content);
 
       Object.entries(flatTranslations).forEach(([key, value]) => {
@@ -534,18 +580,39 @@ function Translations({ user }) {
 
         if (!initialEditedValues[screen]) {
           initialEditedValues[screen] = {};
+          initialValuesSnapshot[screen] = {};
         }
 
+        // The proposal key should be: language.screen.fullKey
+        // where fullKey already contains the screen prefix
         const proposalKey = `${lang}.${screen}.${key}`;
         const proposal = proposalsRes.data[proposalKey];
-        // Only show pending proposals, not approved/rejected ones
-        if (proposal && proposal.status === 'pending') {
-          initialEditedValues[screen][key] = proposal.proposedValue;
-        } else {
-          initialEditedValues[screen][key] = value;
+
+        // Debug specific keys
+        if (key.includes('today_training')) {
+          console.log('🔍 Checking proposal on load:', {
+            key,
+            screen,
+            proposalKey,
+            proposal,
+            hasProposal: !!proposal,
+            proposalStatus: proposal?.status
+          });
         }
+
+        // Determine the initial value to display
+        let displayValue = value;
+        if (proposal && proposal.status === 'pending') {
+          displayValue = proposal.proposedValue;
+        }
+
+        // Set both edited values and initial snapshot
+        initialEditedValues[screen][key] = displayValue;
+        initialValuesSnapshot[screen][key] = displayValue; // Store the same value as initial reference
       });
+
       setEditedValues(initialEditedValues);
+      setInitialValues(initialValuesSnapshot); // Store the initial state
       
     } catch (err) {
       console.error('Error loading translations');
@@ -558,47 +625,29 @@ function Translations({ user }) {
     try {
       setDownloading(true);
 
-      // Use the new structure endpoint
-      const response = await downloadTranslationsWithStructure();
-      const structureData = response.data;
+      // Use the ZIP endpoint that returns a binary blob
+      const response = await downloadTranslationsWithStructureZip();
 
-      console.log('Downloaded structure data:', structureData);
+      // The response.data is already a Blob
+      const blob = response.data;
 
-      // Create a new ZIP file
-      const zip = new JSZip();
-
-      // Process the new structure: repo -> language -> files
-      Object.entries(structureData).forEach(([repoName, repoData]) => {
-        Object.entries(repoData).forEach(([language, langData]) => {
-          Object.entries(langData).forEach(([fileName, fileContent]) => {
-            const filePath = `${repoName}/${language}/${fileName}`;
-            zip.file(filePath, JSON.stringify(fileContent, null, 2));
-          });
-        });
-      });
-
-      // Generate the ZIP file
-      const zipBlob = await zip.generateAsync({
-        type: 'blob',
-        compression: 'DEFLATE',
-        compressionOptions: {
-          level: 9
-        }
-      });
+      // Create URL from blob
+      const url = window.URL.createObjectURL(blob);
 
       // Create download link
-      const url = window.URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `translations-structure-${new Date().toISOString().split('T')[0]}.zip`;
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
+
+      // Cleanup
       window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
 
     } catch (err) {
       console.error('Error downloading translations structure:', err);
-      alert('Error downloading translations structure');
+      alert('Error downloading translations ZIP file');
     } finally {
       setDownloading(false);
     }
@@ -952,7 +1001,7 @@ function Translations({ user }) {
     }, 300);
   };
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="bg-white rounded-lg shadow-sm">
         <div className="border-b bg-white p-6">
@@ -960,29 +1009,11 @@ function Translations({ user }) {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h1 className="text-2xl font-bold text-gray-900">Translations</h1>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600 font-medium">Language:</span>
-              <div className="flex flex-wrap gap-2">
-                {languages.map(lang => (
-                  <button
-                    key={lang}
-                    disabled
-                    className={`px-4 py-2 rounded-lg font-medium opacity-50 cursor-not-allowed ${
-                      selectedLanguage === lang
-                        ? 'bg-milo-red text-white shadow-md'
-                        : 'bg-gray-100 text-gray-700'
-                    }`}
-                  >
-                    <span className="mr-2">{getLanguageFlag(lang)}</span>
-                    {lang.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
         <div className="p-6">
-          <div className="flex items-center justify-center py-12">
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-milo-red"></div>
             <div className="text-gray-600">Loading translations...</div>
           </div>
         </div>
@@ -1006,8 +1037,15 @@ function Translations({ user }) {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search keys, English, or current language..."
-                className="w-80 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-milo-red focus:border-milo-red"
+                className="w-80 px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-milo-red focus:border-milo-red"
               />
+
+              {/* Search loading indicator */}
+              {isSearching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-milo-red"></div>
+                </div>
+              )}
               
               {/* Search Results Dropdown */}
               {showSearchResults && searchResults.length > 0 && (
@@ -1053,23 +1091,35 @@ function Translations({ user }) {
               <button
                 key={lang}
                 onClick={() => handleLanguageChange(lang)}
+                disabled={loading}
                 className={`px-4 py-2 rounded-lg font-medium transition-all transform hover:scale-105 ${
                   selectedLanguage === lang
                     ? 'bg-milo-red text-white shadow-md'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <span className="mr-2">{getLanguageFlag(lang)}</span>
                 {lang.toUpperCase()}
               </button>
             ))}
           </div>
-          
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-milo-red"></div>
+              <span>Loading {selectedLanguage.toUpperCase()} translations...</span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Translations content */}
       <div className="p-6">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-milo-red"></div>
+            <div className="text-gray-600">Loading {selectedLanguage.toUpperCase()} translations...</div>
+          </div>
+        ) : (
         <div className="space-y-6">
           {(() => {
             const categories = getScreensByCategory();
@@ -1186,20 +1236,45 @@ function Translations({ user }) {
                               const proposal = userProposals[proposalKey];
                               const hasPendingProposal = proposal && proposal.status === 'pending';
 
-                              // Debug log for testing
-                              if (key === 'email.today_training.headerTitle' || key === 'email.today_training.greeting') {
-                                console.log('🔍 Checking proposal for key:', {
+                              // Debug log for testing - check all proposal keys format
+                              if (Object.keys(userProposals).length > 0 && Math.random() < 0.01) {
+                                console.log('📦 Sample proposal keys:', Object.keys(userProposals).slice(0, 3));
+                              }
+
+                              // Debug specific keys
+                              if (key.includes('today_training') && Math.random() < 0.5) {
+                                console.log('🔍 Checking proposal in render:', {
                                   originalScreen,
                                   key,
                                   proposalKey,
                                   proposal,
                                   hasPendingProposal,
-                                  allProposals: Object.keys(userProposals)
+                                  userProposalsKeys: Object.keys(userProposals).filter(k => k.includes(key.split('.').pop()))
                                 });
                               }
                               const modified = isModified(originalScreen, key);
                               const isSaving = savingKeys.has(proposalKey);
                               const currentValue = editedValues[originalScreen]?.[key] || currentTranslationValue;
+
+                              // Get the initial value from when the page loaded
+                              const initialValue = initialValues[originalScreen]?.[key] || currentTranslationValue;
+
+                              // Check if we should show the save button
+                              // Only show button when the current value differs from what was initially in the field
+                              const shouldShowSaveButton = currentValue !== initialValue;
+
+                              // Debug the button visibility logic
+                              if (key.includes('today_training') && Math.random() < 0.3) {
+                                console.log('🔘 Button visibility check:', {
+                                  key,
+                                  shouldShowSaveButton,
+                                  hasPendingProposal,
+                                  currentValue: currentValue?.substring(0, 50),
+                                  initialValue: initialValue?.substring(0, 50),
+                                  proposalValue: proposal?.proposedValue?.substring(0, 50),
+                                  originalValue: currentTranslationValue?.substring(0, 50)
+                                });
+                              }
 
                               // Check if current translation (with approved proposals) differs from original GitHub version
                               const originalGithubValue = String(flatOriginalGithubTranslations[key] || '');
@@ -1223,6 +1298,16 @@ function Translations({ user }) {
                                                 {key}
                                               </span>
                                             </div>
+
+                                            {/* Show original GitHub translation when it differs */}
+                                            {isDifferentFromOriginal && originalGithubValue && (
+                                              <div className="mt-1 p-2 bg-gray-50 border-l-2 border-gray-300 rounded">
+                                                <div className="text-xs text-gray-600">
+                                                  <span className="font-semibold">Original ({selectedLanguage.toUpperCase()}):</span>
+                                                  <span className="ml-2">{originalGithubValue}</span>
+                                                </div>
+                                              </div>
+                                            )}
                                           </div>
                                         </div>
                                       </div>
@@ -1279,8 +1364,8 @@ function Translations({ user }) {
                                         }}
                                       />
 
-                                      {/* Save Button - Only when modified */}
-                                      {modified && (
+                                      {/* Save Button - Only when modified and appropriate */}
+                                      {shouldShowSaveButton && (
                                         <div className="flex justify-end">
                                           <button
                                             onClick={() => saveCurrentTranslation(originalScreen, key)}
@@ -1290,9 +1375,9 @@ function Translations({ user }) {
                                                 ? 'bg-gray-400 text-white cursor-not-allowed'
                                                 : 'bg-milo-red text-white hover:bg-milo-dark'
                                             }`}
-                                            title="Crear Propuesta de Traducción"
+                                            title={hasPendingProposal ? "Actualizar Propuesta" : "Crear Propuesta de Traducción"}
                                           >
-                                            {isSaving ? 'Creando...' : 'Crear Propuesta'}
+                                            {isSaving ? 'Creando...' : (hasPendingProposal ? 'Actualizar Propuesta' : 'Crear Propuesta')}
                                           </button>
                                         </div>
                                       )}
@@ -1313,6 +1398,7 @@ function Translations({ user }) {
           ));
           })()}
         </div>
+        )}
 
         {/* Unsaved changes indicator */}
         {countModified() > 0 && (

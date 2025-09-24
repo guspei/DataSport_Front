@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import JSZip from 'jszip';
-import { 
+import {
   getLanguages,
   getAllProposals,
   approveProposal,
   rejectProposal,
   getTranslations,
-  downloadTranslationsWithStructure
+  downloadTranslationsWithStructure,
+  downloadTranslationsWithStructureZip
 } from '../services/api';
 
 function ReviewTranslations() {
@@ -17,6 +17,7 @@ function ReviewTranslations() {
   const [originalTranslations, setOriginalTranslations] = useState({});
   const [englishTranslations, setEnglishTranslations] = useState({});
   const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [expandedScreens, setExpandedScreens] = useState(new Set());
   const [processingIds, setProcessingIds] = useState(new Set());
   const [languageCounts, setLanguageCounts] = useState({});
@@ -45,22 +46,49 @@ function ReviewTranslations() {
   };
 
   useEffect(() => {
-    loadLanguages();
-    loadLanguageCounts();
-    
+    const loadInitialData = async () => {
+      setInitialLoading(true);
+      try {
+        // Load in parallel for better performance
+        await Promise.all([
+          loadLanguages(),
+          loadLanguageCounts()
+        ]);
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+        // Retry once after a short delay
+        setTimeout(() => {
+          console.log('Retrying initial data load...');
+          loadLanguages();
+          loadLanguageCounts();
+        }, 1000);
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+
+    loadInitialData();
+
     // Auto-refresh proposals count every 30 seconds
     const interval = setInterval(() => {
-      loadLanguageCounts();
+      if (!loading) {
+        loadLanguageCounts();
+      }
     }, 30000);
-    
+
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    if (selectedLanguage) {
-      loadProposalsAndTranslations(selectedLanguage);
-    }
-  }, [selectedLanguage]);
+    // Add small delay to ensure component is mounted
+    const timeoutId = setTimeout(() => {
+      if (selectedLanguage && !initialLoading) {
+        loadProposalsAndTranslations(selectedLanguage);
+      }
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedLanguage, initialLoading]);
 
   const loadLanguages = async () => {
     try {
@@ -119,25 +147,36 @@ function ReviewTranslations() {
   };
 
   const loadProposalsAndTranslations = async (lang) => {
+    if (!lang) {
+      console.warn('No language specified for loading proposals');
+      return;
+    }
+
     try {
       setLoading(true);
+      console.log(`🔄 Loading proposals for language: ${lang}`);
 
-      // Load all pending proposals for this language
-      const proposalsRes = await getAllProposals({
-        language: lang,
-        status: 'pending'
-      });
+      // Load all data in parallel for better performance
+      const promises = [
+        getAllProposals({ language: lang, status: 'pending' }),
+        getTranslations(lang)
+      ];
 
-      // Load original translations for comparison
-      const translationsRes = await getTranslations(lang);
-
-      // Load English translations for reference
-      let englishRes = null;
+      // Try to load English translations
       try {
-        englishRes = await getTranslations('en');
-        setEnglishTranslations(englishRes.data.content);
+        promises.push(getTranslations('en'));
       } catch (err) {
         console.log('English translations not available');
+      }
+
+      const results = await Promise.all(promises);
+      const proposalsRes = results[0];
+      const translationsRes = results[1];
+      const englishRes = results[2];
+
+      if (englishRes) {
+        setEnglishTranslations(englishRes.data.content);
+      } else {
         setEnglishTranslations({});
       }
 
@@ -178,7 +217,20 @@ function ReviewTranslations() {
       
       setGroupedProposals(grouped);
     } catch (err) {
-      console.error('Error loading proposals');
+      console.error('Error loading proposals:', err);
+
+      // Show user-friendly error message
+      if (err.response?.status === 401) {
+        alert('Session expired. Please login again.');
+      } else {
+        // Retry once after delay
+        console.log('Retrying proposals load...');
+        setTimeout(() => {
+          if (selectedLanguage === lang) {
+            loadProposalsAndTranslations(lang);
+          }
+        }, 1500);
+      }
     } finally {
       setLoading(false);
     }
@@ -271,59 +323,30 @@ function ReviewTranslations() {
   const handleDownloadAll = async () => {
     try {
       setDownloading(true);
-      
-      // Create a new ZIP file
-      const zip = new JSZip();
-      
-      // Get all translations with GitHub structure maintained
-      const response = await downloadTranslationsWithStructure();
-      const structuredData = response.data;
-      
-      // Create folder structure: lang/fe/*.json and lang/email/*.json
-      Object.keys(structuredData).forEach(lang => {
-        const langData = structuredData[lang];
-        
-        // Add fe/ files
-        if (langData.fe) {
-          Object.keys(langData.fe).forEach(fileName => {
-            const filePath = `${lang}/fe/${fileName}`;
-            const fileContent = JSON.stringify(langData.fe[fileName], null, 2);
-            zip.file(filePath, fileContent);
-          });
-        }
-        
-        // Add email/ files
-        if (langData.email) {
-          Object.keys(langData.email).forEach(fileName => {
-            const filePath = `${lang}/email/${fileName}`;
-            const fileContent = JSON.stringify(langData.email[fileName], null, 2);
-            zip.file(filePath, fileContent);
-          });
-        }
-      });
-      
-      // Generate the ZIP file
-      const zipBlob = await zip.generateAsync({ 
-        type: 'blob',
-        compression: 'DEFLATE',
-        compressionOptions: {
-          level: 9
-        }
-      });
-      
+
+      // Use the ZIP endpoint that returns a binary blob
+      const response = await downloadTranslationsWithStructureZip();
+
+      // The response.data is already a Blob
+      const blob = response.data;
+
+      // Create URL from blob
+      const url = window.URL.createObjectURL(blob);
+
       // Create download link
-      const url = window.URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `translations-with-approved-proposals-${new Date().toISOString().split('T')[0]}.zip`;
+      a.download = `translations-${new Date().toISOString().split('T')[0]}.zip`;
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
+
+      // Cleanup
       window.URL.revokeObjectURL(url);
-      
+      document.body.removeChild(a);
+
     } catch (err) {
       console.error('Error downloading translations:', err);
-      alert('Error downloading translations');
+      alert('Error downloading translations ZIP file');
     } finally {
       setDownloading(false);
     }
@@ -358,10 +381,20 @@ function ReviewTranslations() {
     return count;
   };
 
-  if (loading) {
+  if (initialLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-gray-600">Loading proposals...</div>
+      <div className="bg-white rounded-lg shadow-sm">
+        <div className="border-b bg-white p-6">
+          <div className="space-y-4">
+            <h1 className="text-2xl font-bold text-gray-900">Review Proposals</h1>
+          </div>
+        </div>
+        <div className="p-6">
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-milo-red"></div>
+            <div className="text-gray-600">Loading proposals...</div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -389,11 +422,12 @@ function ReviewTranslations() {
                 <button
                   key={lang}
                   onClick={() => setSelectedLanguage(lang)}
+                  disabled={loading}
                   className={`px-4 py-2 rounded-lg font-medium transition-all transform hover:scale-105 flex items-center gap-2 ${
                     selectedLanguage === lang
                       ? 'bg-milo-red text-white shadow-md'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                  } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <span>{getLanguageFlag(lang)}</span>
                   <span>{lang.toUpperCase()}</span>
@@ -431,7 +465,12 @@ function ReviewTranslations() {
 
       {/* Content */}
       <div className="p-6">
-        {Object.keys(groupedProposals).length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-milo-red"></div>
+            <div className="text-gray-600">Loading {selectedLanguage.toUpperCase()} proposals...</div>
+          </div>
+        ) : Object.keys(groupedProposals).length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-500">No pending proposals for {selectedLanguage.toUpperCase()}</p>
           </div>

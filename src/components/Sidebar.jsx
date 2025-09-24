@@ -6,7 +6,7 @@ function Sidebar({ user, setUser, isCollapsed, setIsCollapsed }) {
   const location = useLocation();
   const navigate = useNavigate();
   
-  const [translationsExpanded, setTranslationsExpanded] = useState(false);
+  const [translationsExpanded, setTranslationsExpanded] = useState(true);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -89,11 +89,25 @@ function Sidebar({ user, setUser, isCollapsed, setIsCollapsed }) {
   ];
 
   const translationSubItems = [
-    { name: 'Screens', path: '/translations/screens' },
-    { name: 'Translations', path: '/translations' },
-    { 
-      name: 'Proposals', 
+    {
+      name: 'Screens',
+      path: '/translations/screens',
+      roles: ['admin', 'translator_master']
+    },
+    {
+      name: 'Translations',
+      path: '/translations',
+      roles: ['translator', 'translator_master', 'admin']
+    },
+    {
+      name: 'My Proposals',
+      path: '/translations/my-proposals',
+      roles: ['translator', 'translator_master', 'admin']
+    },
+    {
+      name: 'Review Proposals',
       path: '/translations/review',
+      roles: ['translator_master', 'admin'],
       badge: (isAdmin || user?.roles?.includes('translator_master')) && pendingProposalsCount > 0 ? pendingProposalsCount : null
     }
   ];
@@ -193,28 +207,30 @@ function Sidebar({ user, setUser, isCollapsed, setIsCollapsed }) {
                 {/* Translations Submenu */}
                 {!isCollapsed && translationsExpanded && (
                   <div className="ml-6 mt-2 space-y-1">
-                    {translationSubItems.map((subItem) => (
-                      <Link
-                        key={subItem.name}
-                        to={subItem.path}
-                        className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                          isActive(subItem.path)
-                            ? 'bg-milo-red text-white'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        <span className="ml-3">{subItem.name}</span>
-                        {subItem.badge && (
-                          <span className={`px-2 py-1 text-xs rounded-full ${
+                    {translationSubItems
+                      .filter(subItem => !subItem.roles || hasAccess(subItem.roles))
+                      .map((subItem) => (
+                        <Link
+                          key={subItem.name}
+                          to={subItem.path}
+                          className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                             isActive(subItem.path)
-                              ? 'bg-white text-milo-red'
-                              : 'bg-milo-red text-white'
-                          }`}>
-                            {subItem.badge}
-                          </span>
-                        )}
-                      </Link>
-                    ))}
+                              ? 'bg-milo-red text-white'
+                              : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          <span className="ml-3">{subItem.name}</span>
+                          {subItem.badge && (
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              isActive(subItem.path)
+                                ? 'bg-white text-milo-red'
+                                : 'bg-milo-red text-white'
+                            }`}>
+                              {subItem.badge}
+                            </span>
+                          )}
+                        </Link>
+                      ))}
                   </div>
                 )}
               </div>

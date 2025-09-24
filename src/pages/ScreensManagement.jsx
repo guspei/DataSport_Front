@@ -23,7 +23,7 @@ function CreateScreenButton({ onCreate }) {
         setScreenName('');
         setIsCreating(false);
       } catch (error) {
-        console.error('Error creating screen:', error);
+        // Error creating screen
         // Keep the form open on error
       }
     }
@@ -198,15 +198,30 @@ function ScreensManagement() {
     const section = key.split('.')[0];
     const fileName = `${section}.json`;
 
+    // First try exact match
     if (filesMetadata[fileName]) {
       return {
-        repository: filesMetadata[fileName].repository,
-        folder: filesMetadata[fileName].folder,
-        source: filesMetadata[fileName].source,
+        repository: filesMetadata[fileName].repository || 'unknown',
+        folder: filesMetadata[fileName].folder || 'unknown',
+        source: filesMetadata[fileName].source || 'unknown',
         fileName: fileName
       };
     }
 
+    // If no exact match, look for files that start with the section name
+    for (const [file, metadata] of Object.entries(filesMetadata)) {
+      if (file.startsWith(section)) {
+        return {
+          repository: metadata.repository || 'unknown',
+          folder: metadata.folder || 'unknown',
+          source: metadata.source || 'unknown',
+          fileName: file
+        };
+      }
+    }
+
+    // Log when we can't find metadata for a key
+    console.warn(`⚠️ No file metadata found for key: ${key}, section: ${section}`);
     return null;
   };
 
@@ -230,17 +245,80 @@ function ScreensManagement() {
     try {
       setLoading(true);
       const res = await getTranslations(lang);
+
+      // Log the entire response to see what we're getting
+      console.log('🔍 Loading translations for language:', lang.toUpperCase());
+      console.log('📡 Full API response:', res.data);
+
       const translationsData = res.data.content;
       const filesData = res.data.files || {};
+
+      // Log repository and files being loaded
+      console.log('📦 Files metadata received:', filesData);
+      console.log('📊 Number of files:', Object.keys(filesData).length);
+
+      // Count total repositories
+      const repos = new Set();
+      Object.entries(filesData).forEach(([fileName, fileInfo]) => {
+        const repo = fileInfo.repo || 'unknown';
+        repos.add(repo);
+        const path = fileInfo.path || fileName;
+        console.log(`  📁 Repository: ${repo}, File: ${path}`);
+      });
+      console.log(`🏢 Total repositories: ${repos.size}`, Array.from(repos));
+
+      // Log translation structure
+      if (translationsData) {
+        const sections = Object.keys(translationsData);
+        console.log('📚 Translation sections found:', sections);
+        console.log('📈 Total sections:', sections.length);
+
+        let totalKeys = 0;
+        sections.forEach(section => {
+          const keys = translationsData[section] ? Object.keys(translationsData[section]) : [];
+          totalKeys += keys.length;
+          console.log(`  📄 Section "${section}" has ${keys.length} keys`);
+          if (keys.length <= 5) {
+            console.log(`     Keys:`, keys);
+          } else {
+            console.log(`     Sample keys:`, keys.slice(0, 5), `... and ${keys.length - 5} more`);
+          }
+        });
+        console.log(`🔢 Total keys across all sections: ${totalKeys}`);
+      } else {
+        console.warn('⚠️ No translation data received!');
+      }
 
       setTranslations(translationsData);
       setFilesMetadata(filesData);
 
       // Flatten the nested translations for UI display
       const flattened = flattenObject(translationsData);
+      console.log(`✅ Total translation keys loaded: ${Object.keys(flattened).length}`);
+
+      // Log the actual keys to see what's being displayed
+      const keysBySection = {};
+      Object.keys(flattened).forEach(key => {
+        const section = key.split('.')[0];
+        if (!keysBySection[section]) {
+          keysBySection[section] = [];
+        }
+        keysBySection[section].push(key);
+      });
+
+      console.log('🗂️ Keys grouped by section:');
+      Object.entries(keysBySection).forEach(([section, keys]) => {
+        console.log(`  📂 ${section}: ${keys.length} keys displayed in UI`);
+        if (keys.length <= 3) {
+          console.log(`     Keys: ${keys.join(', ')}`);
+        } else {
+          console.log(`     Sample keys: ${keys.slice(0, 3).join(', ')}...`);
+        }
+      });
+
       setFlatTranslations(flattened);
     } catch (err) {
-      console.error('Error loading translations');
+      // Error loading translations
     } finally {
       setLoading(false);
     }
@@ -250,13 +328,18 @@ function ScreensManagement() {
     try {
       const response = await getScreens();
       const screens = response.data;
-      
+
+      console.log('🖥️  Loading custom screens configuration...');
+      console.log('📊 Total screens from database:', screens.length);
+
       // Convert screens to the format expected by the UI
       const screenGroups = {};
       screens.forEach(screen => {
+        const keyCount = screen.keys ? screen.keys.length : 0;
+        console.log(`  🗂️  Screen "${screen.name}": ${keyCount} keys assigned`);
         screenGroups[screen.name] = new Set(screen.keys || []);
       });
-      
+
       setCustomScreens(screenGroups);
 
       // Initialize screen order from backend or use default order
@@ -280,10 +363,22 @@ function ScreensManagement() {
         
         const allKeys = Object.keys(flattenObject(translations));
         const unassigned = allKeys.filter(key => !assignedKeys.has(key));
+
+        console.log(`🔑 Total translation keys: ${allKeys.length}`);
+        console.log(`✅ Assigned keys: ${assignedKeys.size}`);
+        console.log(`❌ Unassigned keys: ${unassigned.length}`);
+
+        if (unassigned.length > 0 && unassigned.length <= 20) {
+          console.log('📝 Unassigned keys:', unassigned);
+        } else if (unassigned.length > 20) {
+          console.log(`📝 First 20 unassigned keys:`, unassigned.slice(0, 20));
+          console.log(`   ... and ${unassigned.length - 20} more`);
+        }
+
         setUnassignedFlags(new Set(unassigned));
       }
     } catch (error) {
-      console.error('Error loading screens from database:', error);
+      // Error loading screens from database
       setCustomScreens({});
       setUnassignedFlags(new Set());
     }
@@ -326,7 +421,7 @@ function ScreensManagement() {
         // Reload screens from database to update UI
         await loadCustomScreenConfiguration();
       } catch (error) {
-        console.error('Error creating screen:', error);
+        // Error creating screen
         alert('Error creating screen. Please try again.');
       }
     }
@@ -349,7 +444,7 @@ function ScreensManagement() {
           await loadCustomScreenConfiguration();
         }
       } catch (error) {
-        console.error('Error deleting screen:', error);
+        // Error deleting screen
         alert('Error deleting screen. Please try again.');
       }
     }
@@ -384,7 +479,7 @@ function ScreensManagement() {
       const screen = response.data.find(s => s.name === screenName);
       
       if (!screen) {
-        console.error('Screen not found:', screenName);
+        // Screen not found
         return;
       }
 
@@ -393,7 +488,7 @@ function ScreensManagement() {
         try {
           await addKeyToScreen(screen._id, flagStr);
         } catch (error) {
-          console.error('Error adding key to screen:', error);
+          // Error adding key to screen
         }
       }
 
@@ -401,7 +496,7 @@ function ScreensManagement() {
       setSelectedUnassignedFlags(new Set());
       await loadCustomScreenConfiguration();
     } catch (error) {
-      console.error('Error assigning flags to screen:', error);
+      // Error assigning flags to screen
       alert('Error assigning flags. Please try again.');
     }
   };
@@ -414,7 +509,7 @@ function ScreensManagement() {
       const screen = response.data.find(s => s.name === screenName);
       
       if (!screen) {
-        console.error('Screen not found:', screenName);
+        // Screen not found
         return;
       }
 
@@ -424,7 +519,7 @@ function ScreensManagement() {
       // Reload configuration to update UI
       await loadCustomScreenConfiguration();
     } catch (error) {
-      console.error('Error removing key from screen:', error);
+      // Error removing key from screen
       alert('Error removing key. Please try again.');
     }
   };
@@ -476,7 +571,7 @@ function ScreensManagement() {
       // Reload configuration to update UI
       await loadCustomScreenConfiguration();
     } catch (error) {
-      console.error('Error during drag and drop:', error);
+      // Error during drag and drop
       alert('Error moving key. Please try again.');
     }
 
@@ -545,16 +640,16 @@ function ScreensManagement() {
         // Call the backend API
         await reorderScreens(screenOrders);
 
-        console.log('Screen order updated successfully');
+        // Screen order updated successfully
       } catch (error) {
-        console.error('Error updating screen order:', error);
+        // Error updating screen order
 
         // Check if it's a 404 (endpoint not implemented yet)
         if (error.response && error.response.status === 404) {
-          console.warn('Backend API for reordering not yet implemented. Order saved temporarily in frontend.');
+          // Backend API for reordering not yet implemented. Order saved temporarily in frontend.
           // Keep the new order in the UI until backend is ready
         } else if (error.response && error.response.status === 500) {
-          console.warn('Backend API for reordering not yet implemented (500 error). Order saved temporarily in frontend.');
+          // Backend API for reordering not yet implemented (500 error). Order saved temporarily in frontend.
           // Keep the new order in the UI until backend is ready
         } else {
           // For other errors, revert the order
