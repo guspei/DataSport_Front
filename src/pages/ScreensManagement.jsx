@@ -78,6 +78,106 @@ function CreateScreenButton({ onCreate }) {
   );
 }
 
+// RepositoryFilter component
+function RepositoryFilter({ availableRepositories, selectedRepositories, onRepositoryToggle, onSelectAll, onClearAll }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedCount = selectedRepositories.size;
+  const totalCount = availableRepositories.length;
+  const isAllSelected = selectedCount === totalCount;
+  const isNoneSelected = selectedCount === 0;
+
+  const formatRepositoryName = (repo) => {
+    // Extract the last part of the repository name for display
+    return repo.split('/').pop() || repo;
+  };
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+          isNoneSelected
+            ? 'bg-gray-300 text-gray-500'
+            : isAllSelected
+            ? 'bg-blue-600 text-white hover:bg-blue-700'
+            : 'bg-blue-500 text-white hover:bg-blue-600'
+        }`}
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+        Filter by Repository ({selectedCount}/{totalCount})
+        <svg
+          className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-64 overflow-y-auto">
+          <div className="p-3 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  onSelectAll();
+                  setIsOpen(false);
+                }}
+                className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+              >
+                Select All
+              </button>
+              <button
+                onClick={() => {
+                  onClearAll();
+                  setIsOpen(false);
+                }}
+                className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
+          <div className="py-1">
+            {availableRepositories.map((repo) => (
+              <label
+                key={repo}
+                className="flex items-center w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedRepositories.has(repo)}
+                  onChange={() => onRepositoryToggle(repo)}
+                  className="mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <span className="flex-1" title={repo}>
+                  {formatRepositoryName(repo)}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // AssignToScreenDropdown component
 function AssignToScreenDropdown({ selectedCount, customScreens, onAssign, disabled }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -169,6 +269,8 @@ function ScreensManagement() {
   const [collapsedScreens, setCollapsedScreens] = useState(new Set());
   const [draggedScreen, setDraggedScreen] = useState(null);
   const [screenOrder, setScreenOrder] = useState([]);
+  const [availableRepositories, setAvailableRepositories] = useState([]);
+  const [selectedRepositories, setSelectedRepositories] = useState(new Set());
 
   // Helper function to flatten nested object into dot-notation keys
   const flattenObject = (obj, prefix = '') => {
@@ -192,6 +294,17 @@ function ScreensManagement() {
     return flattened;
   };
 
+  // Helper function to check if a key belongs to selected repositories
+  const isKeyInSelectedRepositories = (key) => {
+    if (selectedRepositories.size === 0) return false; // No repositories selected
+    if (selectedRepositories.size === availableRepositories.length) return true; // All repositories selected
+
+    const fileMetadata = getFileMetadataForKey(key);
+    if (!fileMetadata) return false;
+
+    return selectedRepositories.has(fileMetadata.repository);
+  };
+
   // Helper function to get file metadata for a specific key
   const getFileMetadataForKey = (key) => {
     // Extract the first part of the key (section) to match with files metadata
@@ -201,7 +314,7 @@ function ScreensManagement() {
     // First try exact match
     if (filesMetadata[fileName]) {
       return {
-        repository: filesMetadata[fileName].repository || 'unknown',
+        repository: filesMetadata[fileName].repo || filesMetadata[fileName].repository || 'unknown',
         folder: filesMetadata[fileName].folder || 'unknown',
         source: filesMetadata[fileName].source || 'unknown',
         fileName: fileName
@@ -212,7 +325,7 @@ function ScreensManagement() {
     for (const [file, metadata] of Object.entries(filesMetadata)) {
       if (file.startsWith(section)) {
         return {
-          repository: metadata.repository || 'unknown',
+          repository: metadata.repo || metadata.repository || 'unknown',
           folder: metadata.folder || 'unknown',
           source: metadata.source || 'unknown',
           fileName: file
@@ -255,12 +368,16 @@ function ScreensManagement() {
       // Count total repositories
       const repos = new Set();
       Object.entries(filesData).forEach(([fileName, fileInfo]) => {
-        const repo = fileInfo.repo || 'unknown';
+        const repo = fileInfo.repo || fileInfo.repository || 'unknown';
         repos.add(repo);
         const path = fileInfo.path || fileName;
         // Process repository and file
       });
-      // Total repositories processed
+      // Set available repositories for filtering
+      const repoArray = Array.from(repos).sort();
+      setAvailableRepositories(repoArray);
+      // Initialize with all repositories selected
+      setSelectedRepositories(new Set(repoArray));
 
       // Process translation structure
       if (translationsData) {
@@ -629,6 +746,25 @@ function ScreensManagement() {
     setDraggedScreen(null);
   };
 
+  // Repository filter handlers
+  const handleRepositoryToggle = (repository) => {
+    const newSelection = new Set(selectedRepositories);
+    if (newSelection.has(repository)) {
+      newSelection.delete(repository);
+    } else {
+      newSelection.add(repository);
+    }
+    setSelectedRepositories(newSelection);
+  };
+
+  const handleSelectAllRepositories = () => {
+    setSelectedRepositories(new Set(availableRepositories));
+  };
+
+  const handleClearAllRepositories = () => {
+    setSelectedRepositories(new Set());
+  };
+
 
   if (loading) {
     return (
@@ -658,9 +794,33 @@ function ScreensManagement() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-4">
               <h1 className="text-2xl font-bold text-gray-900">Screen Management</h1>
+              {Object.keys(flatTranslations).length > 0 && (
+                <span className="px-3 py-1 text-sm bg-gray-100 text-gray-600 rounded-full">
+                  {(() => {
+                    const filteredKeysCount = Object.keys(flatTranslations).filter(key =>
+                      isKeyInSelectedRepositories(key)
+                    ).length;
+                    const totalKeysCount = Object.keys(flatTranslations).length;
+
+                    if (selectedRepositories.size === availableRepositories.length) {
+                      return `${totalKeysCount} total keys`;
+                    }
+                    return `${filteredKeysCount}/${totalKeysCount} keys`;
+                  })()}
+                </span>
+              )}
             </div>
-            
-            <CreateScreenButton onCreate={createNewScreen} />
+
+            <div className="flex items-center gap-3">
+              <RepositoryFilter
+                availableRepositories={availableRepositories}
+                selectedRepositories={selectedRepositories}
+                onRepositoryToggle={handleRepositoryToggle}
+                onSelectAll={handleSelectAllRepositories}
+                onClearAll={handleClearAllRepositories}
+              />
+              <CreateScreenButton onCreate={createNewScreen} />
+            </div>
           </div>
           
         </div>
@@ -674,12 +834,17 @@ function ScreensManagement() {
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-medium text-gray-700 flex items-center gap-2">
                 <span className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                  {unassignedFlags.size}
+                  {Array.from(unassignedFlags).filter(key => isKeyInSelectedRepositories(key)).length}
                 </span>
                 Unassigned Keys
+                {selectedRepositories.size < availableRepositories.length && (
+                  <span className="text-xs text-gray-500">
+                    (filtered from {unassignedFlags.size})
+                  </span>
+                )}
               </h3>
               
-              {unassignedFlags.size > 0 && (
+              {Array.from(unassignedFlags).filter(key => isKeyInSelectedRepositories(key)).length > 0 && (
                 <div className="flex items-center gap-2">
                   <button
                     onClick={selectAllUnassignedFlags}
@@ -706,7 +871,7 @@ function ScreensManagement() {
             
             <div className="min-h-[80px] border-2 border-dashed border-gray-300 rounded-lg p-4 bg-white">
               <div className="flex flex-wrap gap-2">
-                {Array.from(unassignedFlags).map(key => {
+                {Array.from(unassignedFlags).filter(key => isKeyInSelectedRepositories(key)).map(key => {
                   const translationValue = flatTranslations[key] || 'N/A';
                   const isSelected = selectedUnassignedFlags.has(key);
                   const fileMetadata = getFileMetadataForKey(key);
@@ -740,9 +905,14 @@ function ScreensManagement() {
                     </div>
                   );
                 })}
-                {unassignedFlags.size === 0 && (
+                {Array.from(unassignedFlags).filter(key => isKeyInSelectedRepositories(key)).length === 0 && (
                   <div className="text-gray-400 text-sm italic">
-                    No unassigned keys. All translation keys have been organized into screens.
+                    {unassignedFlags.size === 0
+                      ? "No unassigned keys. All translation keys have been organized into screens."
+                      : selectedRepositories.size === 0
+                      ? "No repositories selected. Please select repositories to see unassigned keys."
+                      : "No unassigned keys for selected repositories."
+                    }
                   </div>
                 )}
               </div>
@@ -803,7 +973,7 @@ function ScreensManagement() {
 
                         <h3 className="text-lg font-semibold text-gray-900">{screenName}</h3>
                         <span className="text-sm text-gray-500">
-                          ({Array.from(flags).length} flags)
+                          ({Array.from(flags).filter(key => isKeyInSelectedRepositories(key)).length}/{Array.from(flags).length} flags)
                         </span>
                       </div>
                       <button
@@ -825,7 +995,7 @@ function ScreensManagement() {
                     >
                       <div className="min-h-[80px] border-2 border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
                         <div className="flex flex-wrap gap-2">
-                          {Array.from(flags).map(key => {
+                          {Array.from(flags).filter(key => isKeyInSelectedRepositories(key)).map(key => {
                             const translationValue = flatTranslations[key] || 'N/A';
                             const fileMetadata = getFileMetadataForKey(key);
 
@@ -867,9 +1037,14 @@ function ScreensManagement() {
                               </div>
                             );
                           })}
-                          {Array.from(flags).length === 0 && (
+                          {Array.from(flags).filter(key => isKeyInSelectedRepositories(key)).length === 0 && (
                             <div className="text-gray-400 text-sm italic">
-                              Select keys from "Unassigned Keys" and assign them to this screen
+                              {Array.from(flags).length === 0
+                                ? "Select keys from \"Unassigned Keys\" and assign them to this screen"
+                                : selectedRepositories.size === 0
+                                ? "No repositories selected"
+                                : "No keys from selected repositories in this screen"
+                              }
                             </div>
                           )}
                         </div>
